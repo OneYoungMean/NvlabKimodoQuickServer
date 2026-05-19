@@ -72,8 +72,8 @@ if not exist "%VENV_PY%" (
   >&2 echo [ERROR] Please rerun setup_kimodo_offline.bat.
   exit /b 1
 )
-if not exist "%ROOT_DIR%\checkpoints\Kimodo-SOMA-RP-v1\model.safetensors" (
-  >&2 echo [ERROR] Missing checkpoint: %ROOT_DIR%\checkpoints\Kimodo-SOMA-RP-v1\model.safetensors
+if not exist "%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors" (
+  >&2 echo [ERROR] Missing checkpoint: %ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors
   >&2 echo [ERROR] Please rerun setup_kimodo_offline.bat.
   exit /b 1
 )
@@ -108,7 +108,7 @@ if not defined SELECTED_TEXT_ENCODER_DIR (
   exit /b 1
 )
 
-set "CHECKPOINT_DIR=%OFFLINE_ASSETS%\checkpoints"
+set "CHECKPOINT_DIR=%OFFLINE_ASSETS%\models"
 set "HF_HOME=%OFFLINE_ASSETS%\hf_cache"
 set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
 set "HUGGINGFACE_HUB_CACHE=%HF_HOME%\hub"
@@ -142,7 +142,7 @@ if errorlevel 1 (
   popd >nul
   exit /b 1
 )
-"%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_NAME%" --kimodo-root "%ROOT_DIR%"
+"%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_NAME%"
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
 exit /b %EXIT_CODE%
@@ -156,7 +156,7 @@ if exist "%ROOT_DIR%\.venv\Scripts\python.exe" (
   "%ROOT_DIR%\.venv\Scripts\python.exe" -c "import numpy; import kimodo" >nul 2>nul
   if errorlevel 1 set "NEED_SETUP=1"
 )
-if not exist "%ROOT_DIR%\checkpoints\Kimodo-SOMA-RP-v1\model.safetensors" set "NEED_SETUP=1"
+if not exist "%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors" set "NEED_SETUP=1"
 if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" if not exist "%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4\model.safetensors" set "NEED_SETUP=1"
 
 if "%NEED_SETUP%"=="0" (

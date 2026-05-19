@@ -23,13 +23,23 @@ class LLM2VecEncoder(nn.Module):
         super().__init__()
         self.torch_dtype = getattr(torch, dtype)
         self.llm_dim = llm_dim
-        
-        custom_path = r"path_to_your_Llama_text-encoders"
-        if os.path.exists(custom_path):
-            self.custom_dir = custom_path
+
+        custom_path = os.environ.get("KIMODO_TEXT_ENCODER_DIR", "").strip()
+        if custom_path:
+            candidate_dir = os.path.abspath(custom_path)
         else:
-            root_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir, os.pardir, os.pardir))
-            self.custom_dir = os.path.abspath(os.path.join(root_path, "models", "KIMODO-Meta3_llm2vec_NF4"))
+            root_path = os.environ.get("KIMODO_ROOT_PATH", "").strip()
+            if root_path:
+                root_path = os.path.abspath(root_path)
+            else:
+                root_path = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, os.pardir)
+                )
+            candidate_dir = os.path.join(root_path, "models", "KIMODO-Meta3_llm2vec_NF4")
+
+        if not os.path.exists(candidate_dir):
+            raise FileNotFoundError(f"[LLM2VecEncoder] Missing local text encoder directory: {candidate_dir}")
+        self.custom_dir = candidate_dir
         
         print(f"[LLM2VecEncoder] Initializing model from {self.custom_dir}...")
         print(f"[LLM2VecEncoder] Initialized (Waiting for first use to load weights)...")
@@ -49,8 +59,11 @@ class LLM2VecEncoder(nn.Module):
                     except Exception:
                         pass
                 elif platform.system() == "Windows":
-                    from kimodo.demo.memory_manager import release_system_memory
-                    release_system_memory()
+                    try:
+                        from kimodo.demo.memory_manager import release_system_memory
+                        release_system_memory()
+                    except Exception:
+                        pass
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -66,11 +79,18 @@ class LLM2VecEncoder(nn.Module):
                 base_model_name_or_path=self.custom_dir,
                 peft_model_name_or_path=None,
                 torch_dtype=self.torch_dtype,
-                device_map="cpu"
+                device_map="cpu",
+                local_files_only=True
             )
 
-        from kimodo.demo.memory_manager import manager
-        manager.ensure_vram_capacity(5400 * 1024 * 1024, device="cuda:0", exclude_name="text_encoder")
+        manager = None
+        try:
+            from kimodo.demo.memory_manager import manager as _manager
+            manager = _manager
+        except Exception:
+            manager = None
+        if manager is not None:
+            manager.ensure_vram_capacity(5400 * 1024 * 1024, device="cuda:0", exclude_name="text_encoder")
 
         curr_device = self.get_device()
         if curr_device.type != "cuda":
@@ -90,8 +110,11 @@ class LLM2VecEncoder(nn.Module):
                 except Exception:
                     pass
             elif platform.system() == "Windows":
-                from kimodo.demo.memory_manager import release_system_memory
-                release_system_memory()
+                try:
+                    from kimodo.demo.memory_manager import release_system_memory
+                    release_system_memory()
+                except Exception:
+                    pass
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -99,7 +122,8 @@ class LLM2VecEncoder(nn.Module):
             if torch.backends.mps.is_available():
                 torch.mps.empty_cache()
             
-            manager.log_memory_usage("Encoder Transfer Complete (RAM Reclaimed)")
+            if manager is not None:
+                manager.log_memory_usage("Encoder Transfer Complete (RAM Reclaimed)")
         else:
             print(f"[LLM2VecEncoder] Model already on GPU ({curr_device})")
 

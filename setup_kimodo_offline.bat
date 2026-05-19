@@ -105,13 +105,11 @@ set "PY_ZIP_PATH=%TEMP%\%PY_EMBED_ZIP%"
 set "PIP_BOOTSTRAP_DIR=%ROOT_DIR%\pip_bootstrap"
 set "GETPIP_LOCAL="
 
-if exist "%ROOT_DIR%\get-pip\get-pip-main\public\get-pip.py" set "GETPIP_LOCAL=%ROOT_DIR%\get-pip\get-pip-main\public\get-pip.py"
-if not defined GETPIP_LOCAL if exist "%PIP_BOOTSTRAP_DIR%\get-pip.py" set "GETPIP_LOCAL=%PIP_BOOTSTRAP_DIR%\get-pip.py"
+if exist "%ROOT_DIR%\get-pip\public\get-pip.py" set "GETPIP_LOCAL=%ROOT_DIR%\get-pip\public\get-pip.py"
 if not defined GETPIP_LOCAL (
   echo [ERROR] Local get-pip.py not found.
-  echo [ERROR] Expected one of:
-  echo [ERROR]   %ROOT_DIR%\get-pip\get-pip-main\public\get-pip.py
-  echo [ERROR]   %PIP_BOOTSTRAP_DIR%\get-pip.py
+  echo [ERROR] Expected:
+  echo [ERROR]   %ROOT_DIR%\get-pip\public\get-pip.py
   exit /b 1
 )
 
@@ -296,9 +294,8 @@ if errorlevel 1 (
 )
 
 if not exist "%ROOT_DIR%\models" mkdir "%ROOT_DIR%\models"
-if not exist "%ROOT_DIR%\checkpoints" mkdir "%ROOT_DIR%\checkpoints"
 
-set "REQ_CHECKPOINT=%ROOT_DIR%\checkpoints\Kimodo-SOMA-RP-v1\model.safetensors"
+set "REQ_CHECKPOINT=%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors"
 set "REQ_META_DIR=%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct"
 set "REQ_NF4=%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4\model.safetensors"
 
