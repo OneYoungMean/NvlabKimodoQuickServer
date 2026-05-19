@@ -1,0 +1,42 @@
+[STEP] Checking network reachability...
+[INFO] Selected pip index: https://mirrors.aliyun.com/pypi/simple/ (CN mirror)
+[STEP] Ensuring pip...
+[INFO] pip already present in python312, skip bootstrap.
+[STEP] Ensuring virtualenv...
+Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+Requirement already satisfied: virtualenv in .\python312\Lib\site-packages (21.3.3)
+Requirement already satisfied: distlib<1,>=0.3.7 in .\python312\Lib\site-packages (from virtualenv) (0.4.0)
+Requirement already satisfied: filelock<4,>=3.24.2 in .\python312\Lib\site-packages (from virtualenv) (3.29.0)
+Requirement already satisfied: platformdirs<5,>=3.9.1 in .\python312\Lib\site-packages (from virtualenv) (4.9.6)
+Requirement already satisfied: python-discovery>=1.3.1 in .\python312\Lib\site-packages (from virtualenv) (1.3.1)
+[STEP] Ensuring pip tools in venv...
+Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+Requirement already satisfied: pip in .\.venv\Lib\site-packages (26.1.1)
+Requirement already satisfied: setuptools<82 in .\.venv\Lib\site-packages (81.0.0)
+Requirement already satisfied: wheel in .\.venv\Lib\site-packages (0.47.0)
+Requirement already satisfied: packaging>=24.0 in .\.venv\Lib\site-packages (from wheel) (26.2)
+[STEP] Ensuring torchruntime helper...
+[INFO] torchruntime already present, skip reinstall.
+[STEP] Ensuring PyTorch...
+[INFO] torch/torchvision/torchaudio already present, skip reinstall.
+2.11.0+cu128
+True
+[STEP] Ensuring runtime deps from pip...
+[INFO] Runtime deps already present, skip reinstall.
+[STEP] Ensuring kimodo editable package...
+[INFO] kimodo already usable, skip reinstall.
+[STEP] Ensuring bitsandbytes for 4-bit quantization...
+[INFO] bitsandbytes already present, skip reinstall.
+[STEP] Ensuring motion_correction...
+[INFO] motion_correction already present, skip reinstall.
+[STEP] Ensuring required offline models...
+[STEP] Cloning https://www.modelscope.cn/nv-community/Kimodo-SOMA-RP-v1.1.git
+Cloning into 'C:\nvlab\NvlabKimodoQuickServer\models\Kimodo-SOMA-RP-v1'...
+[STEP] Cloning https://www.modelscope.cn/oneyoungmean/KIMODO-Meta3_llm2vec_NF4.git
+Cloning into 'C:\nvlab\NvlabKimodoQuickServer\models\KIMODO-Meta3_llm2vec_NF4'...
+Filtering content: 100% (2/2)Filtering content: 100% (2/2), 356.97 MiB | 1.79 MiB/sFiltering content: 100% (2/2), 356.97 MiB | 1.86 MiB/s, done.
+[OK] Model clone complete.
+[OK] Offline setup staged.
+[INFO] ROOT_DIR=C:\nvlab\NvlabKimodoQuickServer
+[INFO] VENV_PY=C:\nvlab\NvlabKimodoQuickServer\.venv\Scripts\python.exe
+[INFO] SENTINEL=C:\nvlab\NvlabKimodoQuickServer\.kimodo_offline_setup_complete
