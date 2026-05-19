@@ -53,7 +53,7 @@ echo [STEP] Checking network reachability...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $u='%PIP_INDEX_URL_CN%'; $t=20;" ^
   "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec $t -Uri $u | Out-Null; exit 0 } catch { exit 1 }"
-if not errorlevel 1 (
+if "%ERRORLEVEL%"=="0" (
   set "PIP_INDEX_URL=%PIP_INDEX_URL_CN%"
   set "PIP_TRUSTED_HOST=%PIP_TRUSTED_HOST_CN%"
   echo [INFO] Selected pip index: !PIP_INDEX_URL! ^(CN mirror^)
@@ -61,7 +61,7 @@ if not errorlevel 1 (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference='Stop'; $u='%PIP_INDEX_URL_GLOBAL%'; $t=20;" ^
     "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec $t -Uri $u | Out-Null; exit 0 } catch { exit 1 }"
-  if not errorlevel 1 (
+  if "%ERRORLEVEL%"=="0" (
     set "PIP_INDEX_URL=%PIP_INDEX_URL_GLOBAL%"
     set "PIP_TRUSTED_HOST=%PIP_TRUSTED_HOST_GLOBAL%"
     echo [INFO] Selected pip index: !PIP_INDEX_URL! ^(global fallback^)
@@ -79,11 +79,11 @@ set "PY_OFFICIAL_OK=0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $u='%PY_ZIP_MIRROR_BASE%'; $t=20;" ^
   "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec $t -Uri $u | Out-Null; exit 0 } catch { exit 1 }"
-if not errorlevel 1 set "PY_MIRROR_OK=1"
+if "%ERRORLEVEL%"=="0" set "PY_MIRROR_OK=1"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $u='%PY_ZIP_OFFICIAL_BASE%'; $t=20;" ^
   "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec $t -Uri $u | Out-Null; exit 0 } catch { exit 1 }"
-if not errorlevel 1 set "PY_OFFICIAL_OK=1"
+if "%ERRORLEVEL%"=="0" set "PY_OFFICIAL_OK=1"
 if "%PY_MIRROR_OK%"=="0" if "%PY_OFFICIAL_OK%"=="0" (
   echo [ERROR] Python download sources not reachable.
   echo [ERROR] Checked:
@@ -117,9 +117,9 @@ if not exist "%PY312_EXE%" (
   echo [STEP] Downloading embeddable Python %PY_VER% arch=%PY_ARCH%...
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -TimeoutSec 180 -Uri '%PY_ZIP_MIRROR%' -OutFile '%PY_ZIP_PATH%'"
-  if errorlevel 1 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  if not "%ERRORLEVEL%"=="0" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -TimeoutSec 180 -Uri '%PY_ZIP_OFFICIAL%' -OutFile '%PY_ZIP_PATH%'"
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] Failed to download embeddable Python zip.
     exit /b 1
   )
@@ -127,7 +127,7 @@ if not exist "%PY312_EXE%" (
   if exist "%PY312_DIR%" rmdir /s /q "%PY312_DIR%"
   mkdir "%PY312_DIR%" || exit /b 1
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%PY_ZIP_PATH%' -DestinationPath '%PY312_DIR%' -Force"
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] Failed to extract embeddable Python zip.
     exit /b 1
   )
@@ -146,13 +146,13 @@ if exist "%PTH_FILE%" (
 
 echo [STEP] Ensuring pip...
 "%PY312_EXE%" -m pip --version >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   if exist "%PIP_BOOTSTRAP_DIR%\pip-26.1.1-py3-none-any.whl" (
     "%PY312_EXE%" "%GETPIP_LOCAL%" --no-index --find-links "%PIP_BOOTSTRAP_DIR%"
   ) else (
     "%PY312_EXE%" "%GETPIP_LOCAL%" --index-url "%PIP_INDEX_URL%" --trusted-host "%PIP_TRUSTED_HOST%"
   )
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] Failed to install pip.
     exit /b 1
   )
@@ -166,7 +166,7 @@ if exist "%PIP_BOOTSTRAP_DIR%\virtualenv-21.3.3-py3-none-any.whl" (
 ) else (
   "%PY312_EXE%" -m pip install %PIP_COMMON% virtualenv
 )
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   echo [ERROR] Failed to install virtualenv.
   exit /b 1
 )
@@ -182,16 +182,16 @@ if not exist "%VENV_PY%" (
 
 echo [STEP] Ensuring pip tools in venv...
 "%VENV_PY%" -m pip install %PIP_COMMON% --upgrade pip "setuptools<82" wheel
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   echo [ERROR] Failed to bootstrap pip/setuptools/wheel in venv.
   exit /b 1
 )
 
 echo [STEP] Ensuring torchruntime helper...
 "%VENV_PY%" -c "import torchruntime" >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   "%VENV_PY%" -m pip install %PIP_COMMON% torchruntime
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] Failed to install torchruntime.
     exit /b 1
   )
@@ -201,10 +201,10 @@ if errorlevel 1 (
 
 echo [STEP] Ensuring PyTorch...
 "%VENV_PY%" -c "import torch; import torchvision; import torchaudio; print(torch.__version__)" >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   "%VENV_PY%" -m torchruntime info
   "%VENV_PY%" -m torchruntime install
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] torchruntime install failed.
     exit /b 1
   )
@@ -213,16 +213,16 @@ if errorlevel 1 (
 )
 
 "%VENV_PY%" -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   echo [ERROR] Torch import check failed after torchruntime install.
   exit /b 1
 )
 
 echo [STEP] Ensuring runtime deps from pip...
 "%VENV_PY%" -c "import huggingface_hub, safetensors" >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   "%VENV_PY%" -m pip install %PIP_COMMON% huggingface_hub safetensors
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] Failed to install runtime dependencies from pip.
     exit /b 1
   )
@@ -232,7 +232,7 @@ if errorlevel 1 (
 
 echo [STEP] Ensuring kimodo editable package...
 "%VENV_PY%" -c "from kimodo import load_model" >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   set "SKIP_MOTION_CORRECTION_IN_SETUP=1"
   pushd "%SOURCE_ROOT%" >nul
   "%VENV_PY%" -m pip install %PIP_COMMON% -e . --no-build-isolation
@@ -248,9 +248,9 @@ if errorlevel 1 (
 
 echo [STEP] Ensuring bitsandbytes for 4-bit quantization...
 "%VENV_PY%" -c "import bitsandbytes as bnb; print(getattr(bnb, '__version__', 'unknown'))" >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   "%VENV_PY%" -m pip install %PIP_COMMON% "bitsandbytes>=0.46.1"
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] Failed to install bitsandbytes required for 4-bit quantization.
     exit /b 1
   )
@@ -263,7 +263,7 @@ set "MC_WHL_WIN=%ROOT_DIR%\wheels\motion_correction-1.0.0-cp312-cp312-win_amd64.
 set "MC_WHL_LINUX=%ROOT_DIR%\wheels\motion_correction-1.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
 set "MC_SRC=%SOURCE_ROOT%\MotionCorrection\python\motion_correction"
 "%VENV_PY%" -c "import motion_correction" >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   if exist "%MC_WHL_WIN%" (
     "%VENV_PY%" -m pip install %PIP_COMMON% "%MC_WHL_WIN%"
   ) else if exist "%MC_WHL_LINUX%" (
@@ -285,7 +285,7 @@ if errorlevel 1 (
     echo [ERROR]   %MC_SRC%\setup.py
     exit /b 1
   )
-  if errorlevel 1 (
+  if not "%ERRORLEVEL%"=="0" (
     echo [ERROR] Failed to install motion_correction.
     exit /b 1
   )

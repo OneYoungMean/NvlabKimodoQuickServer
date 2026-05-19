@@ -13,6 +13,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import traceback
 from dataclasses import dataclass
 from typing import Any
@@ -257,22 +258,6 @@ def main():
     parser.add_argument("--kimodo-root", default=None)
     args = parser.parse_args()
 
-    _out({"status": "loading", "message": "Importing Kimodo..."})
-    try:
-        import torch
-        from kimodo import load_model
-    except Exception as exc:
-        _out({"status": "error", "message": f"Failed to import kimodo: {exc}"})
-        return
-
-    device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
-    _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
-    try:
-        model = load_model(args.model, device=device)
-    except Exception as exc:
-        _out({"status": "error", "message": f"Model load failed: {exc}\n{traceback.format_exc()}"})
-        return
-
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((args.host, int(args.port)))
@@ -284,9 +269,58 @@ def main():
     with open(port_file, "w", encoding="utf-8") as f:
         f.write(f"{host}:{port}\n")
     os.environ["KIMODO_BRIDGE_LOG"] = os.path.join(kimodo_root, "bridge_runtime.log")
-    _log(f"[bridge] ready host={host} port={port} model={args.model} device={device}")
+    _log(f"[bridge] listening host={host} port={port} model={args.model}")
 
-    _out({"status": "ready", "model": args.model, "device": device, "fps": int(model.fps), "host": host, "port": int(port)})
+    state = {
+        "model": None,
+        "fps": 30,
+        "device": "unknown",
+        "loading": True,
+        "error": ""
+    }
+    state_lock = threading.Lock()
+
+    def _load_model_worker():
+        _out({"status": "loading", "message": "Importing Kimodo..."})
+        try:
+            import torch
+            from kimodo import load_model
+        except Exception as exc:
+            with state_lock:
+                state["error"] = f"Failed to import kimodo: {exc}"
+                state["loading"] = False
+            _log(f"[bridge] load error {state['error']}")
+            return
+
+        device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
+        try:
+            model = load_model(args.model, device=device)
+        except Exception as exc:
+            with state_lock:
+                state["error"] = f"Model load failed: {exc}\n{traceback.format_exc()}"
+                state["loading"] = False
+            _log(f"[bridge] load error {exc}")
+            return
+
+        with state_lock:
+            state["model"] = model
+            state["fps"] = int(model.fps)
+            state["device"] = device
+            state["loading"] = False
+            state["error"] = ""
+
+        _log(f"[bridge] ready host={host} port={port} model={args.model} device={device}")
+        _out({
+            "status": "ready",
+            "model": args.model,
+            "device": device,
+            "fps": int(model.fps),
+            "host": host,
+            "port": int(port)
+        })
+
+    threading.Thread(target=_load_model_worker, daemon=True).start()
 
     quitting = False
     try:
@@ -295,65 +329,93 @@ def main():
             _log(f"[bridge] accept {_addr}")
             with conn:
                 file = conn.makefile("rwb")
-                line = file.readline()
-                if not line:
-                    continue
+                while not quitting:
+                    line = file.readline()
+                    if not line:
+                        break
 
-                try:
-                    req = json.loads(line.decode("utf-8").strip())
-                except Exception as exc:
-                    resp = {"status": "error", "message": f"Bad JSON: {exc}"}
+                    try:
+                        req = json.loads(line.decode("utf-8").strip())
+                    except Exception as exc:
+                        resp = {"status": "error", "message": f"Bad JSON: {exc}"}
+                        file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                        file.flush()
+                        continue
+
+                    cmd = req.get("cmd", "")
+                    _log(f"[bridge] cmd={cmd}")
+                    try:
+                        if cmd == "ping":
+                            with state_lock:
+                                if state["loading"]:
+                                    resp = {"status": "loading", "message": "Model is loading."}
+                                elif state["error"]:
+                                    resp = {"status": "error", "message": state["error"]}
+                                else:
+                                    resp = {"status": "pong"}
+                        elif cmd == "generate":
+                            with state_lock:
+                                loading = state["loading"]
+                                load_error = state["error"]
+                                model = state["model"]
+                                fps = state["fps"]
+
+                            if loading:
+                                resp = {"status": "loading", "message": "Model is loading."}
+                                file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                                file.flush()
+                                continue
+                            if load_error:
+                                resp = {"status": "error", "message": load_error}
+                                file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                                file.flush()
+                                continue
+                            if model is None:
+                                resp = {"status": "error", "message": "Model not available."}
+                                file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                                file.flush()
+                                continue
+
+                            from kimodo.tools import seed_everything
+                            prompt = str(req.get("prompt", "A person walks forward.")).strip()
+                            if not prompt.endswith("."):
+                                prompt += "."
+                            duration = float(req.get("duration", 5.0))
+                            seed = req.get("seed", None)
+                            diffusion_steps = int(req.get("diffusion_steps", 100))
+                            constraints_path = req.get("constraints_json", "")
+
+                            if seed is not None:
+                                seed_everything(int(seed))
+
+                            num_frames = max(1, int(duration * float(fps)))
+                            constraints = _load_constraints(constraints_path, model)
+
+                            output = model(
+                                [prompt],
+                                [num_frames],
+                                constraint_lst=constraints,
+                                num_denoising_steps=diffusion_steps,
+                                num_samples=1,
+                                multi_prompt=True,
+                                num_transition_frames=5,
+                                post_processing=True,
+                                return_numpy=True,
+                            )
+
+                            motion_data = UnityMotionJsonResult.from_model_output(model, output, prompt, sample_index=0)
+                            resp = {"status": "done", "motion_json_compact": motion_data.to_compact_json()}
+                        elif cmd == "quit":
+                            resp = {"status": "bye"}
+                            quitting = True
+                        else:
+                            resp = {"status": "error", "message": f"Unknown cmd: {cmd!r}"}
+                    except Exception as exc:
+                        resp = {"status": "error", "message": str(exc), "traceback": traceback.format_exc()}
+                        _log(f"[bridge] error {exc}")
+
                     file.write((json.dumps(resp) + "\n").encode("utf-8"))
                     file.flush()
-                    continue
-
-                cmd = req.get("cmd", "")
-                _log(f"[bridge] cmd={cmd}")
-                try:
-                    if cmd == "ping":
-                        resp = {"status": "pong"}
-                    elif cmd == "generate":
-                        from kimodo.tools import seed_everything
-
-                        prompt = str(req.get("prompt", "A person walks forward.")).strip()
-                        if not prompt.endswith("."):
-                            prompt += "."
-                        duration = float(req.get("duration", 5.0))
-                        seed = req.get("seed", None)
-                        diffusion_steps = int(req.get("diffusion_steps", 100))
-                        constraints_path = req.get("constraints_json", "")
-
-                        if seed is not None:
-                            seed_everything(int(seed))
-
-                        num_frames = max(1, int(duration * float(model.fps)))
-                        constraints = _load_constraints(constraints_path, model)
-
-                        output = model(
-                            [prompt],
-                            [num_frames],
-                            constraint_lst=constraints,
-                            num_denoising_steps=diffusion_steps,
-                            num_samples=1,
-                            multi_prompt=True,
-                            num_transition_frames=5,
-                            post_processing=True,
-                            return_numpy=True,
-                        )
-
-                        motion_data = UnityMotionJsonResult.from_model_output(model, output, prompt, sample_index=0)
-                        resp = {"status": "done", "motion_json_compact": motion_data.to_compact_json()}
-                    elif cmd == "quit":
-                        resp = {"status": "bye"}
-                        quitting = True
-                    else:
-                        resp = {"status": "error", "message": f"Unknown cmd: {cmd!r}"}
-                except Exception as exc:
-                    resp = {"status": "error", "message": str(exc), "traceback": traceback.format_exc()}
-                    _log(f"[bridge] error {exc}")
-
-                file.write((json.dumps(resp) + "\n").encode("utf-8"))
-                file.flush()
     finally:
         try:
             server.close()

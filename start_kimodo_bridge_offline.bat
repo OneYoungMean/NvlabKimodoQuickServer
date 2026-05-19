@@ -1,5 +1,6 @@
-﻿@echo off
+@echo off
 setlocal EnableExtensions EnableDelayedExpansion
+chcp 65001 >nul
 
 rem ------------------------------------------------------------
 rem Start offline bridge (Windows)
@@ -64,7 +65,7 @@ if not exist "%SETUP_SCRIPT%" (
 )
 
 call :ensure_setup_ready
-if errorlevel 1 exit /b 1
+if not "%ERRORLEVEL%"=="0" exit /b 1
 
 set "VENV_PY=%ROOT_DIR%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
@@ -131,12 +132,12 @@ set "EMBED_DIR=%SELECTED_TEXT_ENCODER_DIR%"
 rem llm2vec wrapper now resolves model paths dynamically via KIMODO_ROOT_PATH; no patch step needed.
 
 pushd "%ROOT_DIR%" >nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   >&2 echo [ERROR] Cannot enter ROOT_DIR: %ROOT_DIR%
   exit /b 1
 )
 "%VENV_PY%" -c "import numpy; import kimodo; print('runtime_ok')" >nul 2>nul
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   >&2 echo [ERROR] Runtime deps missing in venv ^(at least numpy/kimodo import failed^).
   >&2 echo [ERROR] Please run setup_kimodo_offline.bat again or install missing pip deps.
   popd >nul
@@ -154,7 +155,7 @@ if not exist "%SETUP_RUN_MARKER%" set "NEED_SETUP=1"
 if not exist "%ROOT_DIR%\.venv\Scripts\python.exe" set "NEED_SETUP=1"
 if exist "%ROOT_DIR%\.venv\Scripts\python.exe" (
   "%ROOT_DIR%\.venv\Scripts\python.exe" -c "import numpy; import kimodo" >nul 2>nul
-  if errorlevel 1 set "NEED_SETUP=1"
+  if not "%ERRORLEVEL%"=="0" set "NEED_SETUP=1"
 )
 if not exist "%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors" set "NEED_SETUP=1"
 if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" if not exist "%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4\model.safetensors" set "NEED_SETUP=1"
@@ -167,7 +168,7 @@ if "%NEED_SETUP%"=="0" (
 echo [STEP] Setup is not complete. Running setup first...
 >&2 echo [Kimodo] First-time setup detected. Initial configuration may take 10-20 minutes. Please wait patiently.
 call "%SETUP_SCRIPT%"
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   >&2 echo [ERROR] Setup failed. See %ROOT_DIR%\setup_kimodo_offline.log
   exit /b 1
 )
