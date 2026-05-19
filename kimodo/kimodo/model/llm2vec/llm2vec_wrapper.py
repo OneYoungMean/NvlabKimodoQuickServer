@@ -24,26 +24,62 @@ class LLM2VecEncoder(nn.Module):
         self.torch_dtype = getattr(torch, dtype)
         self.llm_dim = llm_dim
 
-        custom_path = os.environ.get("KIMODO_TEXT_ENCODER_DIR", "").strip()
-        if custom_path:
-            candidate_dir = os.path.abspath(custom_path)
-        else:
-            root_path = os.environ.get("KIMODO_ROOT_PATH", "").strip()
-            if root_path:
-                root_path = os.path.abspath(root_path)
-            else:
-                root_path = os.path.abspath(
-                    os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, os.pardir)
-                )
-            candidate_dir = os.path.join(root_path, "models", "KIMODO-Meta3_llm2vec_NF4")
+        self.custom_dir = self._resolve_local_text_encoder_dir()
 
-        if not os.path.exists(candidate_dir):
-            raise FileNotFoundError(f"[LLM2VecEncoder] Missing local text encoder directory: {candidate_dir}")
-        self.custom_dir = candidate_dir
-        
         print(f"[LLM2VecEncoder] Initializing model from {self.custom_dir}...")
         print(f"[LLM2VecEncoder] Initialized (Waiting for first use to load weights)...")
         self.model = None
+
+    def _resolve_local_text_encoder_dir(self) -> str:
+        """Resolve local LLM2Vec directory for offline runs."""
+        candidates: list[str] = []
+
+        env_override = os.environ.get("KIMODO_LLM2VEC_DIR", "").strip()
+        if env_override:
+            candidates.append(os.path.abspath(env_override))
+
+        kimodo_root = os.environ.get("KIMODO_ROOT_PATH", "").strip()
+        if kimodo_root:
+            candidates.append(
+                os.path.abspath(os.path.join(kimodo_root, "models", "KIMODO-Meta3_llm2vec_NF4"))
+            )
+
+        # Keep compatibility with the original README override placeholder.
+        manual_placeholder = r"path_to_your_Llama_text-encoders"
+        if manual_placeholder and os.path.isdir(manual_placeholder):
+            candidates.append(os.path.abspath(manual_placeholder))
+
+        # Derive from package location.
+        this_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(
+            os.path.abspath(
+                os.path.join(this_dir, os.pardir, os.pardir, os.pardir, os.pardir, "models", "KIMODO-Meta3_llm2vec_NF4")
+            )
+        )
+        candidates.append(
+            os.path.abspath(
+                os.path.join(this_dir, os.pardir, os.pardir, os.pardir, "models", "KIMODO-Meta3_llm2vec_NF4")
+            )
+        )
+
+        seen = set()
+        ordered_candidates = []
+        for c in candidates:
+            if c and c not in seen:
+                seen.add(c)
+                ordered_candidates.append(c)
+
+        for c in ordered_candidates:
+            if os.path.isdir(c):
+                # Accept either complete weights or HF-style config-only dirs.
+                if os.path.exists(os.path.join(c, "config.json")) or os.path.exists(os.path.join(c, "model.safetensors")):
+                    return c
+
+        raise FileNotFoundError(
+            "[LLM2VecEncoder] Missing local text encoder directory. "
+            "Set KIMODO_LLM2VEC_DIR or ensure KIMODO_ROOT_PATH/models/KIMODO-Meta3_llm2vec_NF4 exists. "
+            f"Checked: {ordered_candidates}"
+        )
 
     def unload(self):
         """Offload the model weights to System RAM (CPU) if currently on GPU."""
@@ -59,11 +95,8 @@ class LLM2VecEncoder(nn.Module):
                     except Exception:
                         pass
                 elif platform.system() == "Windows":
-                    try:
-                        from kimodo.demo.memory_manager import release_system_memory
-                        release_system_memory()
-                    except Exception:
-                        pass
+                    from kimodo.demo.memory_manager import release_system_memory
+                    release_system_memory()
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -79,18 +112,11 @@ class LLM2VecEncoder(nn.Module):
                 base_model_name_or_path=self.custom_dir,
                 peft_model_name_or_path=None,
                 torch_dtype=self.torch_dtype,
-                device_map="cpu",
-                local_files_only=True
+                device_map="cpu"
             )
 
-        manager = None
-        try:
-            from kimodo.demo.memory_manager import manager as _manager
-            manager = _manager
-        except Exception:
-            manager = None
-        if manager is not None:
-            manager.ensure_vram_capacity(5400 * 1024 * 1024, device="cuda:0", exclude_name="text_encoder")
+        from kimodo.demo.memory_manager import manager
+        manager.ensure_vram_capacity(5400 * 1024 * 1024, device="cuda:0", exclude_name="text_encoder")
 
         curr_device = self.get_device()
         if curr_device.type != "cuda":
@@ -110,11 +136,8 @@ class LLM2VecEncoder(nn.Module):
                 except Exception:
                     pass
             elif platform.system() == "Windows":
-                try:
-                    from kimodo.demo.memory_manager import release_system_memory
-                    release_system_memory()
-                except Exception:
-                    pass
+                from kimodo.demo.memory_manager import release_system_memory
+                release_system_memory()
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -122,8 +145,7 @@ class LLM2VecEncoder(nn.Module):
             if torch.backends.mps.is_available():
                 torch.mps.empty_cache()
             
-            if manager is not None:
-                manager.log_memory_usage("Encoder Transfer Complete (RAM Reclaimed)")
+            manager.log_memory_usage("Encoder Transfer Complete (RAM Reclaimed)")
         else:
             print(f"[LLM2VecEncoder] Model already on GPU ({curr_device})")
 

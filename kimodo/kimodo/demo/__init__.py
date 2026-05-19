@@ -1,16 +1,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# ruff: noqa: I001
+"""Demo entrypoint helpers.
+
+Keep this module lightweight so non-UI runtime imports such as
+`kimodo.demo.memory_manager` do not require optional UI dependencies
+(`viser`) at import time.
+"""
+
 import argparse
-
-from kimodo.model import DEFAULT_MODEL
-from kimodo.model.registry import resolve_model_name
-
-from .app import Demo
 
 
 def main() -> None:
+    # Import UI app lazily to avoid requiring viser for headless/bridge usage.
+    from .app import Demo
+    from kimodo.model import DEFAULT_MODEL
+    from kimodo.model.registry import resolve_model_name
+
     parser = argparse.ArgumentParser(description="Run the kimodo demo UI.")
     parser.add_argument(
         "--model",

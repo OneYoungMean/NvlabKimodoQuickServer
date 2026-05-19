@@ -14,6 +14,7 @@ import os
 import socket
 import sys
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 from typing import Any
@@ -276,11 +277,38 @@ def main():
         "fps": 30,
         "device": "unknown",
         "loading": True,
-        "error": ""
+        "error": "",
+        "loading_message": "Importing Kimodo...",
+        "loading_started_at": time.time(),
     }
     state_lock = threading.Lock()
 
+    def _set_loading_message(message: str):
+        with state_lock:
+            if state["loading"]:
+                state["loading_message"] = str(message)
+
+    def _initializing_heartbeat_worker():
+        while True:
+            with state_lock:
+                loading = bool(state["loading"])
+                message = str(state.get("loading_message", "Model is loading."))
+                started_at = float(state.get("loading_started_at", time.time()))
+            if not loading:
+                return
+
+            elapsed_seconds = max(0, int(time.time() - started_at))
+            _out(
+                {
+                    "status": "initializing",
+                    "message": message,
+                    "elapsed_seconds": elapsed_seconds,
+                }
+            )
+            time.sleep(1.0)
+
     def _load_model_worker():
+        _set_loading_message("Importing Kimodo...")
         _out({"status": "loading", "message": "Importing Kimodo..."})
         try:
             import torch
@@ -293,6 +321,7 @@ def main():
             return
 
         device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        _set_loading_message(f"Loading {args.model} on {device}...")
         _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
         try:
             model = load_model(args.model, device=device)
@@ -320,6 +349,7 @@ def main():
             "port": int(port)
         })
 
+    threading.Thread(target=_initializing_heartbeat_worker, daemon=True).start()
     threading.Thread(target=_load_model_worker, daemon=True).start()
 
     quitting = False
@@ -344,6 +374,7 @@ def main():
 
                     cmd = req.get("cmd", "")
                     _log(f"[bridge] cmd={cmd}")
+                    stage = f"cmd:{cmd}" if cmd else "cmd:unknown"
                     try:
                         if cmd == "ping":
                             with state_lock:
@@ -411,7 +442,14 @@ def main():
                         else:
                             resp = {"status": "error", "message": f"Unknown cmd: {cmd!r}"}
                     except Exception as exc:
-                        resp = {"status": "error", "message": str(exc), "traceback": traceback.format_exc()}
+                        resp = {
+                            "status": "error",
+                            "message": str(exc),
+                            "server_message": f"Bridge exception while handling {stage}",
+                            "error_type": type(exc).__name__,
+                            "stage": stage,
+                            "traceback": traceback.format_exc(),
+                        }
                         _log(f"[bridge] error {exc}")
 
                     file.write((json.dumps(resp) + "\n").encode("utf-8"))
