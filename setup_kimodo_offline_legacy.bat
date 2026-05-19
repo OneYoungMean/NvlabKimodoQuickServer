@@ -303,9 +303,21 @@ if not exist "%ROOT_DIR%\models\clonemodel.bat" (
   echo [ERROR] Missing model clone script: %ROOT_DIR%\models\clonemodel.bat
   exit /b 1
 )
-call "%ROOT_DIR%\models\clonemodel.bat"
+if not exist "%ROOT_DIR%\models\clonemodel_async.ps1" (
+  echo [ERROR] Missing async model clone script: %ROOT_DIR%\models\clonemodel_async.ps1
+  exit /b 1
+)
+rem [MODEL_CLONE_SWITCH] Original single-thread clone path (kept for fallback):
+rem call "%ROOT_DIR%\models\clonemodel.bat"
+rem if errorlevel 1 (
+rem   echo [ERROR] Failed to clone required models.
+rem   exit /b 1
+rem )
+
+rem [MODEL_CLONE_SWITCH] Async clone path: run in parallel jobs and wait for all completion.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%\models\clonemodel_async.ps1" -ModelsDir "%ROOT_DIR%\models"
 if errorlevel 1 (
-  echo [ERROR] Failed to clone required models.
+  echo [ERROR] Failed to clone required models (async).
   exit /b 1
 )
 
