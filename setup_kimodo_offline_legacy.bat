@@ -298,6 +298,11 @@ if errorlevel 1 (
 
 if not exist "%ROOT_DIR%\models" mkdir "%ROOT_DIR%\models"
 
+if defined KIMODO_BUILDENV_ONLY (
+  echo [INFO][setup_kimodo_offline_legacy.bat] BuildEnv-only mode enabled. Skip model clone/check and setup sentinel write.
+  goto buildenv_only_done
+)
+
 echo [STEP] Ensuring required offline models...
 if not exist "%ROOT_DIR%\models\clonemodel.bat" (
   echo [ERROR] Missing model clone script: %ROOT_DIR%\models\clonemodel.bat
@@ -364,4 +369,10 @@ echo [OK] Offline setup staged.
 echo [INFO] ROOT_DIR=%ROOT_DIR%
 echo [INFO] VENV_PY=%VENV_PY%
 echo [INFO] SENTINEL=%SETUP_SENTINEL%
+exit /b 0
+
+:buildenv_only_done
+echo [OK][setup_kimodo_offline_legacy.bat] Build environment staged.
+echo [INFO][setup_kimodo_offline_legacy.bat] ROOT_DIR=%ROOT_DIR%
+echo [INFO][setup_kimodo_offline_legacy.bat] VENV_PY=%VENV_PY%
 exit /b 0
