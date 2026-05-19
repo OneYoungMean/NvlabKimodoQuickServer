@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem ------------------------------------------------------------
@@ -142,7 +142,7 @@ if errorlevel 1 (
   popd >nul
   exit /b 1
 )
-"%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_NAME%"
+"%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_NAME%" --kimodo-root "%ROOT_DIR%"
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
 exit /b %EXIT_CODE%
@@ -177,3 +177,4 @@ if not exist "%SETUP_SENTINEL%" (
 )
 echo [INFO] Setup completed.
 exit /b 0
+

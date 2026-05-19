@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """
 Kimodo Unity Bridge Server
 
@@ -10,6 +10,8 @@ Persistent process for Unity Editor:
 
 import argparse
 import json
+import os
+import socket
 import sys
 import traceback
 from dataclasses import dataclass
@@ -21,6 +23,26 @@ import numpy as np
 def _out(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
+
+
+def _log(msg: str):
+    line = str(msg)
+    sys.stderr.write(line + "\n")
+    sys.stderr.flush()
+
+    log_path = os.environ.get("KIMODO_BRIDGE_LOG", "")
+    if not log_path:
+        root = os.environ.get("KIMODO_ROOT_PATH", "")
+        if root:
+            log_path = os.path.join(root, "bridge_runtime.log")
+    if not log_path:
+        return
+
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def _rotation_mats_to_quat_wxyz(rot_mats: np.ndarray) -> np.ndarray:
@@ -230,6 +252,9 @@ def main():
     parser = argparse.ArgumentParser(description="Kimodo Unity Bridge Server")
     parser.add_argument("--model", default="Kimodo-SOMA-RP-v1")
     parser.add_argument("--device", default=None)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--kimodo-root", default=None)
     args = parser.parse_args()
 
     _out({"status": "loading", "message": "Importing Kimodo..."})
@@ -248,34 +273,101 @@ def main():
         _out({"status": "error", "message": f"Model load failed: {exc}\n{traceback.format_exc()}"})
         return
 
-    _out({"status": "ready", "model": args.model, "device": device, "fps": int(model.fps)})
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((args.host, int(args.port)))
+    server.listen(16)
 
-    for raw in sys.stdin:
-        line = raw.strip()
-        if not line:
-            continue
+    host, port = server.getsockname()
+    kimodo_root = args.kimodo_root or os.environ.get("KIMODO_ROOT_PATH") or os.getcwd()
+    port_file = os.path.join(kimodo_root, "serverport")
+    with open(port_file, "w", encoding="utf-8") as f:
+        f.write(f"{host}:{port}\n")
+    os.environ["KIMODO_BRIDGE_LOG"] = os.path.join(kimodo_root, "bridge_runtime.log")
+    _log(f"[bridge] ready host={host} port={port} model={args.model} device={device}")
 
+    _out({"status": "ready", "model": args.model, "device": device, "fps": int(model.fps), "host": host, "port": int(port)})
+
+    quitting = False
+    try:
+        while not quitting:
+            conn, _addr = server.accept()
+            _log(f"[bridge] accept {_addr}")
+            with conn:
+                file = conn.makefile("rwb")
+                line = file.readline()
+                if not line:
+                    continue
+
+                try:
+                    req = json.loads(line.decode("utf-8").strip())
+                except Exception as exc:
+                    resp = {"status": "error", "message": f"Bad JSON: {exc}"}
+                    file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                    file.flush()
+                    continue
+
+                cmd = req.get("cmd", "")
+                _log(f"[bridge] cmd={cmd}")
+                try:
+                    if cmd == "ping":
+                        resp = {"status": "pong"}
+                    elif cmd == "generate":
+                        from kimodo.tools import seed_everything
+
+                        prompt = str(req.get("prompt", "A person walks forward.")).strip()
+                        if not prompt.endswith("."):
+                            prompt += "."
+                        duration = float(req.get("duration", 5.0))
+                        seed = req.get("seed", None)
+                        diffusion_steps = int(req.get("diffusion_steps", 100))
+                        constraints_path = req.get("constraints_json", "")
+
+                        if seed is not None:
+                            seed_everything(int(seed))
+
+                        num_frames = max(1, int(duration * float(model.fps)))
+                        constraints = _load_constraints(constraints_path, model)
+
+                        output = model(
+                            [prompt],
+                            [num_frames],
+                            constraint_lst=constraints,
+                            num_denoising_steps=diffusion_steps,
+                            num_samples=1,
+                            multi_prompt=True,
+                            num_transition_frames=5,
+                            post_processing=True,
+                            return_numpy=True,
+                        )
+
+                        motion_data = UnityMotionJsonResult.from_model_output(model, output, prompt, sample_index=0)
+                        resp = {"status": "done", "motion_json_compact": motion_data.to_compact_json()}
+                    elif cmd == "quit":
+                        resp = {"status": "bye"}
+                        quitting = True
+                    else:
+                        resp = {"status": "error", "message": f"Unknown cmd: {cmd!r}"}
+                except Exception as exc:
+                    resp = {"status": "error", "message": str(exc), "traceback": traceback.format_exc()}
+                    _log(f"[bridge] error {exc}")
+
+                file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                file.flush()
+    finally:
         try:
-            req = json.loads(line)
-        except Exception as exc:
-            _out({"status": "error", "message": f"Bad JSON: {exc}"})
-            continue
-
-        cmd = req.get("cmd", "")
+            server.close()
+        except Exception:
+            pass
         try:
-            if cmd == "ping":
-                _out({"status": "pong"})
-            elif cmd == "generate":
-                _generate(req, model)
-            elif cmd == "quit":
-                _out({"status": "bye"})
-                break
-            else:
-                _out({"status": "error", "message": f"Unknown cmd: {cmd!r}"})
-        except Exception as exc:
-            _out({"status": "error", "message": str(exc), "traceback": traceback.format_exc()})
+            if os.path.exists(port_file):
+                os.remove(port_file)
+        except Exception:
+            _log("[bridge] shutdown")
+            pass
 
 
 if __name__ == "__main__":
     main()
+
 
