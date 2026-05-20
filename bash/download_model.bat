@@ -6,6 +6,7 @@ if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%\.."
 set "LOG_DIR=%ROOT_DIR%\log"
 set "MODELS_DIR=%ROOT_DIR%\models"
+set "RECOVERY_FLAG_DIR=%ROOT_DIR%\archive\recovery_flags"
 set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\download_model.log"
 set "UNLOCK_STALE=0"
@@ -21,6 +22,7 @@ set "META_LLAMA_REPO_URL=https://www.modelscope.cn/models/LLM-Research/Meta-Llam
 set "LLM2VEC_PEFT_REPO_URL=https://www.modelscope.cn/models/oneyoungmean/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
 set "GIT_INSTALLER_PS1=%ROOT_DIR%\bash\ensure_portable_git_lfs.ps1"
 set "GIT_ENV_TMP=%TEMP%\kimodo_git_env_%RANDOM%%RANDOM%.cmd"
+set "INJECT_ONCE=0"
 
 if defined KIMODO_LLM2VEC_NF4_REPO_URL set "LLM2VEC_NF4_REPO_URL=%KIMODO_LLM2VEC_NF4_REPO_URL%"
 if defined KIMODO_META_LLAMA_REPO_URL set "META_LLAMA_REPO_URL=%KIMODO_META_LLAMA_REPO_URL%"
@@ -84,6 +86,8 @@ exit /b %ERRORLEVEL%
 :main
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not exist "%MODELS_DIR%" mkdir "%MODELS_DIR%" >nul 2>nul
+
+if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
 
 call :ensure_git_and_lfs || exit /b 1
 
@@ -228,8 +232,21 @@ if not defined LFS_INCLUDE set "LFS_INCLUDE=%REQ_FILE%"
 call :normalize_repo_url "%REPO_URL%"
 set "REPO_URL=%NORMALIZED_REPO_URL%"
 
+call :should_inject_once "download_net_bad" "KIMODO_TEST_INJECT_DOWNLOAD_NET_BAD_ONCE"
+if "!INJECT_ONCE!"=="1" (
+  echo [TEST] Injected download network failure once: %DEST_DIR%
+  exit /b 93
+)
+
+call :should_inject_once "download_abort" "KIMODO_TEST_INJECT_DOWNLOAD_ABORT_ONCE"
+if "!INJECT_ONCE!"=="1" (
+  echo [TEST] Injected download interrupt once before sync: %DEST_DIR%
+  exit /b 92
+)
+
 if "%FORCE_SYNC%"=="0" if exist "%DEST_DIR%\%REQ_FILE%" (
   echo [INFO] Skip existing model: %DEST_DIR%
+  call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
   exit /b 0
 )
 
@@ -264,6 +281,7 @@ if not exist "%DEST_DIR%" (
 call :prepare_repo "%DEST_DIR%" || exit /b 1
 git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
 if errorlevel 1 exit /b 1
+
 if not exist "%DEST_DIR%\%REQ_FILE%" (
   git -C "%DEST_DIR%" checkout HEAD -- "%REQ_FILE%"
   if errorlevel 1 exit /b 1
@@ -274,6 +292,7 @@ if not exist "%DEST_DIR%\%REQ_FILE%" (
   echo [ERROR] Missing %REQ_FILE% after sync: %DEST_DIR%
   exit /b 1
 )
+call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
 exit /b 0
 
 :normalize_repo_url
@@ -339,4 +358,38 @@ if errorlevel 1 (
   exit /b 1
 )
 echo [WARN] Backed up to: %BACKUP_DIR%
+exit /b 0
+
+:inject_missing_after_download
+set "MISSING_DEST_DIR=%~1"
+set "MISSING_REQ_FILE=%~2"
+set "MISSING_PATH=%MISSING_DEST_DIR%\%MISSING_REQ_FILE%"
+call :should_inject_once "model_missing_after_download" "KIMODO_TEST_INJECT_MODEL_MISSING_AFTER_DOWNLOAD_ONCE"
+if not "!INJECT_ONCE!"=="1" exit /b 0
+if not exist "%MISSING_PATH%" exit /b 0
+set "BROKEN_PATH=%MISSING_PATH%.broken.%RANDOM%%RANDOM%"
+move "%MISSING_PATH%" "%BROKEN_PATH%" >nul
+if errorlevel 1 (
+  echo [ERROR] Failed to inject model missing: %MISSING_PATH%
+  exit /b 1
+)
+echo [TEST] Injected missing model file once: %BROKEN_PATH%
+exit /b 0
+
+:should_inject_once
+set "INJECT_ONCE=0"
+set "ONCE_KEY=%~1"
+set "ONCE_SWITCH_NAME=%~2"
+set "ONCE_SWITCH_VALUE="
+call set "ONCE_SWITCH_VALUE=%%%ONCE_SWITCH_NAME%%%"
+if /I not "%ONCE_SWITCH_VALUE%"=="1" exit /b 0
+if not exist "%RECOVERY_FLAG_DIR%" mkdir "%RECOVERY_FLAG_DIR%" >nul 2>nul
+set "ONCE_FLAG=%RECOVERY_FLAG_DIR%\%ONCE_KEY%.done"
+if exist "%ONCE_FLAG%" exit /b 0
+> "%ONCE_FLAG%" (
+  echo scenario=%KIMODO_TEST_SCENARIO_NAME%
+  echo key=%ONCE_KEY%
+  echo time=%DATE% %TIME%
+)
+set "INJECT_ONCE=1"
 exit /b 0

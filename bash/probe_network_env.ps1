@@ -69,6 +69,7 @@ if (-not $pipPick.Best) {
   Write-Output "[ERROR] No reachable pip index."
   exit 1
 }
+Write-Log ("[BEST] pip index: {0} {1} ({2} ms)" -f $pipPick.Best.Name, $pipPick.Best.Url, $pipPick.Best.Ms)
 
 Write-Log "[STEP] Probing python zip mirrors..."
 $pyPick = Pick-Best -Candidates $pythonZipCandidates
@@ -76,6 +77,7 @@ if (-not $pyPick.Best) {
   Write-Output "[ERROR] No reachable python zip source."
   exit 1
 }
+Write-Log ("[BEST] python zip: {0} {1} ({2} ms)" -f $pyPick.Best.Name, $pyPick.Best.Url, $pyPick.Best.Ms)
 
 $pipIndex = $pipPick.Best.Url
 $pipHost = $pipPick.Best.Host
@@ -87,6 +89,10 @@ Write-Output "[RESULT] PIP_INDEX_URL=$pipIndex"
 Write-Output "[RESULT] PIP_TRUSTED_HOST=$pipHost"
 Write-Output "[RESULT] PIP_ARGS=$pipArgs"
 Write-Output "[RESULT] PYTHON_ZIP_BASE=$pythonBase"
+Write-Output "[RESULT] PIP_BEST_NAME=$($pipPick.Best.Name)"
+Write-Output "[RESULT] PIP_BEST_MS=$($pipPick.Best.Ms)"
+Write-Output "[RESULT] PYTHON_ZIP_BEST_NAME=$($pyPick.Best.Name)"
+Write-Output "[RESULT] PYTHON_ZIP_BEST_MS=$($pyPick.Best.Ms)"
 
 if (-not [string]::IsNullOrWhiteSpace($EmitCmdFile)) {
   $dir = Split-Path -Parent $EmitCmdFile
@@ -100,6 +106,10 @@ if (-not [string]::IsNullOrWhiteSpace($EmitCmdFile)) {
     "set ""KIMODO_PIP_TRUSTED_HOST=$pipHost"""
     "set ""KIMODO_PIP_ARGS=--index-url $pipIndex --trusted-host $pipHost"""
     "set ""KIMODO_PY_ZIP_BASE=$pythonBase"""
+    "set ""KIMODO_PIP_BEST_NAME=$($pipPick.Best.Name)"""
+    "set ""KIMODO_PIP_BEST_MS=$($pipPick.Best.Ms)"""
+    "set ""KIMODO_PY_ZIP_BEST_NAME=$($pyPick.Best.Name)"""
+    "set ""KIMODO_PY_ZIP_BEST_MS=$($pyPick.Best.Ms)"""
   ) | Set-Content -LiteralPath $EmitCmdFile -Encoding ASCII
 }
 

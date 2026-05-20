@@ -10,6 +10,7 @@ set "RUN_MARKER=%ROOT_DIR%\run"
 set "SETUP_LOG=%ROOT_DIR%\log\setup_buildenv_impl.log"
 set "NETWORK_PROBE_PS1=%ROOT_DIR%\bash\probe_network_env.ps1"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
+set "RECOVERY_FLAG_DIR=%ROOT_DIR%\archive\recovery_flags"
 
 if not exist "%ROOT_DIR%" exit /b 1
 if not exist "%ROOT_DIR%\log" mkdir "%ROOT_DIR%\log" >nul 2>nul
@@ -56,6 +57,9 @@ set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
 set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
 set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
 set "PYTHON_SPEC="
+set "INJECT_ONCE=0"
+
+if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
 
 call :ensure_uv
 if errorlevel 1 (
@@ -66,6 +70,7 @@ if errorlevel 1 (
 )
 
 echo [STEP] Checking network reachability for package index...
+echo [INFO] Network probe started...
 if exist "%NETWORK_PROBE_PS1%" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%NETWORK_PROBE_PS1%" -TimeoutSec 8 -EmitCmdFile "%NETWORK_ENV_CMD%" -Quiet
   if not errorlevel 1 (
@@ -76,6 +81,20 @@ if exist "%NETWORK_PROBE_PS1%" (
     if defined KIMODO_PIP_INDEX_URL set "UV_DEFAULT_INDEX=!KIMODO_PIP_INDEX_URL!"
   )
 )
+if defined KIMODO_PIP_BEST_NAME (
+  if defined KIMODO_PIP_BEST_MS (
+    echo [INFO] Network probe result: pip best=!KIMODO_PIP_BEST_NAME! ^(!KIMODO_PIP_BEST_MS! ms^)
+  ) else (
+    echo [INFO] Network probe result: pip best=!KIMODO_PIP_BEST_NAME!
+  )
+)
+if defined KIMODO_PY_ZIP_BEST_NAME (
+  if defined KIMODO_PY_ZIP_BEST_MS (
+    echo [INFO] Network probe result: python zip best=!KIMODO_PY_ZIP_BEST_NAME! ^(!KIMODO_PY_ZIP_BEST_MS! ms^)
+  ) else (
+    echo [INFO] Network probe result: python zip best=!KIMODO_PY_ZIP_BEST_NAME!
+  )
+)
 if defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=!UV_DEFAULT_INDEX:"=!"
 if not defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=%UV_INDEX_CANDIDATE_GLOBAL%"
 
@@ -84,6 +103,12 @@ if /I "%UV_DEFAULT_INDEX%"=="https://pypi.org/simple" (
     "$ErrorActionPreference='Stop'; $u='%UV_INDEX_CANDIDATE_CN%'; $t=20;" ^
     "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec $t -Uri $u | Out-Null; exit 0 } catch { exit 1 }"
   if not errorlevel 1 set "UV_DEFAULT_INDEX=%UV_INDEX_CANDIDATE_CN%"
+)
+
+call :should_inject_once "setup_net_bad" "KIMODO_TEST_INJECT_SETUP_NET_BAD_ONCE"
+if "!INJECT_ONCE!"=="1" (
+  set "UV_DEFAULT_INDEX=http://127.0.0.1:9/simple"
+  echo [TEST] Injected setup network failure once: UV_DEFAULT_INDEX=%UV_DEFAULT_INDEX%
 )
 
 echo [INFO] Selected uv default index: %UV_DEFAULT_INDEX%
@@ -109,6 +134,12 @@ if errorlevel 1 (
 if not exist "%VENV_PY%" (
   echo [ERROR] venv python missing: %VENV_PY%
   exit /b 1
+)
+
+call :should_inject_once "setup_abort" "KIMODO_TEST_INJECT_SETUP_ABORT_ONCE"
+if "!INJECT_ONCE!"=="1" (
+  echo [TEST] Injected setup interrupt once after venv creation.
+  exit /b 91
 )
 
 echo [STEP] Seeding build helpers in venv...
@@ -239,6 +270,24 @@ set "TS=%TS: =0%"
 set "BASE=%~nx1"
 set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
 move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
+exit /b 0
+
+:should_inject_once
+set "INJECT_ONCE=0"
+set "ONCE_KEY=%~1"
+set "ONCE_SWITCH_NAME=%~2"
+set "ONCE_SWITCH_VALUE="
+call set "ONCE_SWITCH_VALUE=%%%ONCE_SWITCH_NAME%%%"
+if /I not "%ONCE_SWITCH_VALUE%"=="1" exit /b 0
+if not exist "%RECOVERY_FLAG_DIR%" mkdir "%RECOVERY_FLAG_DIR%" >nul 2>nul
+set "ONCE_FLAG=%RECOVERY_FLAG_DIR%\%ONCE_KEY%.done"
+if exist "%ONCE_FLAG%" exit /b 0
+> "%ONCE_FLAG%" (
+  echo scenario=%KIMODO_TEST_SCENARIO_NAME%
+  echo key=%ONCE_KEY%
+  echo time=%DATE% %TIME%
+)
+set "INJECT_ONCE=1"
 exit /b 0
 
 :ensure_uv
