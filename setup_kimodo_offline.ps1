@@ -20,28 +20,108 @@ $venvPy = Join-Path $scriptDir ".venv\Scripts\python.exe"
 $reqCheckpoint = Join-Path $scriptDir "models\Kimodo-SOMA-RP-v1\model.safetensors"
 $reqMetaDir = Join-Path $scriptDir "models\Meta-Llama-3-8B-Instruct"
 $reqNf4 = Join-Path $scriptDir "models\KIMODO-Meta3_llm2vec_NF4\model.safetensors"
+$sourceRoot = $null
+if (Test-Path -LiteralPath (Join-Path $scriptDir "pyproject.toml")) {
+    $sourceRoot = $scriptDir
+}
+elseif (Test-Path -LiteralPath (Join-Path $scriptDir "kimodo\pyproject.toml")) {
+    $sourceRoot = Join-Path $scriptDir "kimodo"
+}
+if ($sourceRoot) {
+    $env:PYTHONPATH = $sourceRoot
+}
 
-Write-Output "[STEP]$tag Starting parallel setup stages: buildenv + clonemodel..."
-$buildLog = Join-Path $scriptDir "buildenv_stage.log"
-$cloneLog = Join-Path $scriptDir "clonemodel_stage.log"
-if (Test-Path -LiteralPath $buildLog) { Remove-Item -LiteralPath $buildLog -Force }
-if (Test-Path -LiteralPath $cloneLog) { Remove-Item -LiteralPath $cloneLog -Force }
+# Preferred pip mirrors for constrained networks.
+$pipIndexPrimary = "https://pypi.doubanio.com/simple"
+$pipExtraIndexes = @(
+    "https://pypi.oystermercury.top/ms",
+    "https://gitlab.inria.fr/api/v4/projects/18692/packages/pypi/simple"
+)
+$env:PIP_INDEX_URL = $pipIndexPrimary
+$env:PIP_EXTRA_INDEX_URL = ($pipExtraIndexes -join " ")
+Write-Output "[INFO]$tag PIP_INDEX_URL=$($env:PIP_INDEX_URL)"
+Write-Output "[INFO]$tag PIP_EXTRA_INDEX_URL=$($env:PIP_EXTRA_INDEX_URL)"
 
-$buildProc = Start-Process -FilePath "powershell.exe" -ArgumentList @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $buildEnvPs1, "-RootDir", $scriptDir
-) -RedirectStandardOutput $buildLog -RedirectStandardError $buildLog -PassThru -WindowStyle Hidden
+function Test-BuildEnvReady {
+    param([string]$PythonExe, [string]$SentinelPath)
+    if ((Test-Path -LiteralPath $PythonExe) -and (Test-Path -LiteralPath $SentinelPath)) {
+        return $true
+    }
+    if (-not (Test-Path -LiteralPath $PythonExe)) { return $false }
+    & $PythonExe -c "import numpy; import kimodo; import huggingface_hub; import safetensors" *> $null
+    return ($LASTEXITCODE -eq 0)
+}
 
-$cloneProc = Start-Process -FilePath "powershell.exe" -ArgumentList @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $cloneModelPs1, "-ModelsDir", (Join-Path $scriptDir "models")
-) -RedirectStandardOutput $cloneLog -RedirectStandardError $cloneLog -PassThru -WindowStyle Hidden
+$buildEnvReady = Test-BuildEnvReady -PythonExe $venvPy -SentinelPath $setupSentinel
+if ($buildEnvReady) {
+    Write-Output "[INFO]$tag Buildenv already ready. Skip buildenv stage."
+    Write-Output "[STEP]$tag Running setup stages: clonemodel only."
+    & $cloneModelPs1 -ModelsDir (Join-Path $scriptDir "models") 2>&1 | ForEach-Object { Write-Output "[clonemodel_async.ps1] $_" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "[ERROR]$tag clonemodel_async.ps1 failed with exit code $LASTEXITCODE"
+    }
+}
+else {
+    Write-Output "[STEP]$tag Starting parallel setup stages: buildenv + clonemodel..."
 
-Wait-Process -Id $buildProc.Id, $cloneProc.Id
+    $jobs = @()
+    $jobs += Start-Job -Name "buildenv.ps1" -ScriptBlock {
+        param($scriptPath, $root)
+        $ErrorActionPreference = "Stop"
+        try {
+            & $scriptPath -RootDir $root 2>&1 | ForEach-Object { "[buildenv.ps1] $_" }
+            if ($LASTEXITCODE -ne 0) {
+                throw "ExitCode=$LASTEXITCODE"
+            }
+            [pscustomobject]@{ __stage = "buildenv"; __ok = $true }
+        }
+        catch {
+            [pscustomobject]@{ __stage = "buildenv"; __ok = $false; __error = ($_ | Out-String) }
+        }
+    } -ArgumentList $buildEnvPs1, $scriptDir
 
-if (Test-Path -LiteralPath $buildLog) { Get-Content -LiteralPath $buildLog | ForEach-Object { Write-Output $_ } }
-if (Test-Path -LiteralPath $cloneLog) { Get-Content -LiteralPath $cloneLog | ForEach-Object { Write-Output $_ } }
+    $jobs += Start-Job -Name "clonemodel_async.ps1" -ScriptBlock {
+        param($scriptPath, $modelsDir)
+        $ErrorActionPreference = "Stop"
+        try {
+            & $scriptPath -ModelsDir $modelsDir 2>&1 | ForEach-Object { "[clonemodel_async.ps1] $_" }
+            if ($LASTEXITCODE -ne 0) {
+                throw "ExitCode=$LASTEXITCODE"
+            }
+            [pscustomobject]@{ __stage = "clonemodel"; __ok = $true }
+        }
+        catch {
+            [pscustomobject]@{ __stage = "clonemodel"; __ok = $false; __error = ($_ | Out-String) }
+        }
+    } -ArgumentList $cloneModelPs1, (Join-Path $scriptDir "models")
 
-if ($buildProc.ExitCode -ne 0) { throw "[ERROR]$tag buildenv.ps1 failed with exit code $($buildProc.ExitCode). Log: $buildLog" }
-if ($cloneProc.ExitCode -ne 0) { throw "[ERROR]$tag clonemodel_async.ps1 failed with exit code $($cloneProc.ExitCode). Log: $cloneLog" }
+    $results = @{}
+    foreach ($job in $jobs) {
+        Wait-Job -Job $job | Out-Null
+        $items = Receive-Job -Job $job
+        foreach ($item in $items) {
+            if ($item -is [string]) {
+                Write-Output $item
+                continue
+            }
+            if ($item.PSObject.Properties.Match("__stage").Count -gt 0) {
+                $results[$item.__stage] = $item
+                continue
+            }
+            Write-Output $item
+        }
+    }
+    foreach ($job in $jobs) { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+
+    if ((-not $results.ContainsKey("buildenv")) -or (-not $results["buildenv"].__ok)) {
+        $err = if ($results.ContainsKey("buildenv")) { $results["buildenv"].__error } else { "missing job result" }
+        throw "[ERROR]$tag buildenv.ps1 failed. $err"
+    }
+    if ((-not $results.ContainsKey("clonemodel")) -or (-not $results["clonemodel"].__ok)) {
+        $err = if ($results.ContainsKey("clonemodel")) { $results["clonemodel"].__error } else { "missing job result" }
+        throw "[ERROR]$tag clonemodel_async.ps1 failed. $err"
+    }
+}
 
 if (-not (Test-Path -LiteralPath $venvPy)) { throw "[ERROR]$tag Missing venv python after setup: $venvPy" }
 if (-not (Test-Path -LiteralPath $reqCheckpoint)) { throw "[ERROR]$tag Missing checkpoint: $reqCheckpoint" }

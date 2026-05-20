@@ -12,7 +12,7 @@ set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 for %%I in ("%SCRIPT_DIR%\..") do set "WORKSPACE_ROOT=%%~fI"
 
-set "OFFLINE_ASSETS=%SCRIPT_DIR%"
+set "OFFLINE_ASSETS=%ROOT_DIR%"
 set "ROOT_DIR=%SCRIPT_DIR%"
 set "SOURCE_ROOT="
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"

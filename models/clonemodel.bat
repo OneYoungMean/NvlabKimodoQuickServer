@@ -4,6 +4,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "MODELS_DIR=%SCRIPT_DIR%"
+set "GIT_INSTALLER_PS1=%SCRIPT_DIR%\install_git_and_lfs.ps1"
+set "GIT_ENV_TMP=%TEMP%\kimodo_git_env_%RANDOM%%RANDOM%.cmd"
 set "HIGHVRAM=0"
 set "WANT_SMPLX=0"
 set "WANT_G1=0"
@@ -45,6 +47,19 @@ goto parse_args
 
 :args_done
 if not exist "%MODELS_DIR%" mkdir "%MODELS_DIR%" >nul 2>nul
+if exist "%GIT_INSTALLER_PS1%" (
+  echo [STEP] Ensuring git + git-lfs...
+  if exist "%GIT_ENV_TMP%" del /q "%GIT_ENV_TMP%" >nul 2>nul
+  powershell -NoProfile -File "%GIT_INSTALLER_PS1%" -Quiet -EmitEnvFile "%GIT_ENV_TMP%"
+  if errorlevel 1 (
+    >&2 echo [ERROR] Failed to auto-install git/git-lfs.
+    exit /b 1
+  )
+  if exist "%GIT_ENV_TMP%" (
+    call "%GIT_ENV_TMP%"
+    del /q "%GIT_ENV_TMP%" >nul 2>nul
+  )
+)
 call :ensure_git_lfs || exit /b 1
 
 rem Default: always prepare SOMA checkpoint and NF4 text-encoder.
@@ -80,21 +95,49 @@ set "REPO_URL=%~1"
 set "DEST_DIR=%~2"
 for %%D in ("%DEST_DIR%") do set "PARENT_DIR=%%~dpD"
 if not exist "%PARENT_DIR%" mkdir "%PARENT_DIR%" >nul 2>nul
+
+if exist "%DEST_DIR%" (
+  if not exist "%DEST_DIR%\.git" (
+    echo [WARN] Existing directory is not a git repo, backing up then re-cloning: %DEST_DIR%
+    call :backup_dir "%DEST_DIR%" || exit /b 1
+  ) else (
+    git -C "%DEST_DIR%" rev-parse --verify HEAD >nul 2>nul
+    if errorlevel 1 (
+      echo [WARN] Repo has invalid HEAD, backing up then re-cloning: %DEST_DIR%
+      call :backup_dir "%DEST_DIR%" || exit /b 1
+    )
+  )
+)
+
 if not exist "%DEST_DIR%" (
   echo [STEP] Cloning %REPO_URL%
   git clone "%REPO_URL%" "%DEST_DIR%"
   if errorlevel 1 exit /b 1
 ) else (
-  if not exist "%DEST_DIR%\.git" (
-    >&2 echo [ERROR] Destination exists but is not a git repo: %DEST_DIR%
-    exit /b 1
-  )
   echo [STEP] Updating existing repo: %DEST_DIR%
   git -C "%DEST_DIR%" pull
-  if errorlevel 1 exit /b 1
+  if errorlevel 1 (
+    echo [WARN] git pull failed, backing up and re-cloning: %DEST_DIR%
+    call :backup_dir "%DEST_DIR%" || exit /b 1
+    echo [STEP] Re-cloning %REPO_URL%
+    git clone "%REPO_URL%" "%DEST_DIR%"
+    if errorlevel 1 exit /b 1
+  )
 )
 git -C "%DEST_DIR%" lfs pull
 if errorlevel 1 exit /b 1
+exit /b 0
+
+:backup_dir
+set "DIR_TO_BACKUP=%~1"
+if not exist "%DIR_TO_BACKUP%" exit /b 0
+set "BACKUP_DIR=%DIR_TO_BACKUP%.broken.%RANDOM%%RANDOM%"
+move "%DIR_TO_BACKUP%" "%BACKUP_DIR%" >nul
+if errorlevel 1 (
+  >&2 echo [ERROR] Failed to backup directory: %DIR_TO_BACKUP%
+  exit /b 1
+)
+echo [INFO] Backed up to: %BACKUP_DIR%
 exit /b 0
 
 :ensure_soma_checkpoint

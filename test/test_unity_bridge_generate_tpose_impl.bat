@@ -10,14 +10,14 @@ rem ------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-set "ROOT_DIR=%SCRIPT_DIR%"
+set "ROOT_DIR=%SCRIPT_DIR%\.."
 
 set "LAUNCHER=%ROOT_DIR%\start_kimodo_bridge_offline.bat"
 set "MODEL=Kimodo-SOMA-RP-v1"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "LOG_FILE=%ROOT_DIR%\bridge_test_generate_tpose.log"
 set "CLIENT_LOG_FILE=%ROOT_DIR%\bridge_test_generate_tpose_client.log"
-set "CLIENT_PS1=%ROOT_DIR%\test_unity_bridge_generate_tpose_client.ps1"
+set "CLIENT_PS1=%ROOT_DIR%\test\test_unity_bridge_generate_tpose_client.ps1"
 set "OUTPUT_MODE=%KIMODO_TPOSE_OUTPUT%"
 if not defined OUTPUT_MODE set "OUTPUT_MODE=console"
 
@@ -119,3 +119,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Write-Host ('[TEST] Motion frames={0}, joints={1}, fps={2}' -f $motion.num_frames,$motion.num_joints,$motion.fps)"
 
 exit /b 0
+

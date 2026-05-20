@@ -1,0 +1,6 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+set "SCRIPT_DIR=%~dp0"
+set "ROOT_DIR=%SCRIPT_DIR%\.."
+call "%ROOT_DIR%\test_unity_bridge_generate_tpose.bat" %*
+exit /b %ERRORLEVEL%

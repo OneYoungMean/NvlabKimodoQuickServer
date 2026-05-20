@@ -1,0 +1,181 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+chcp 65001 >nul
+
+rem ------------------------------------------------------------
+rem Start offline bridge (Windows)
+rem Usage:
+rem   start_kimodo_bridge_offline.bat [--model MODEL_NAME]
+rem ------------------------------------------------------------
+
+set "SCRIPT_DIR=%~dp0"
+if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+for %%I in ("%SCRIPT_DIR%\..") do set "WORKSPACE_ROOT=%%~fI"
+
+set "OFFLINE_ASSETS=%ROOT_DIR%"
+set "ROOT_DIR=%SCRIPT_DIR%"
+set "SOURCE_ROOT="
+set "MODEL_NAME=Kimodo-SOMA-RP-v1"
+set "SETUP_RUN_MARKER="
+set "SETUP_LOCK_FILE="
+set "SETUP_SENTINEL="
+set "SETUP_SCRIPT="
+
+:parse_args
+if "%~1"=="" goto args_done
+if /I "%~1"=="--model" (
+  set "MODEL_NAME=%~2"
+  shift
+  shift
+  goto parse_args
+)
+if /I "%~1"=="--kimodo-root" (
+  set "ROOT_DIR=%~2"
+  shift
+  shift
+  goto parse_args
+)
+shift
+goto parse_args
+
+:args_done
+set "SETUP_RUN_MARKER=%ROOT_DIR%\run"
+set "SETUP_LOCK_FILE=%ROOT_DIR%\.setup.lock"
+set "SETUP_SENTINEL=%ROOT_DIR%\.kimodo_offline_setup_complete"
+set "SETUP_SCRIPT=%ROOT_DIR%\setup_kimodo_offline.bat"
+
+if exist "%ROOT_DIR%\pyproject.toml" (
+  set "SOURCE_ROOT=%ROOT_DIR%"
+) else if exist "%ROOT_DIR%\kimodo\pyproject.toml" (
+  set "SOURCE_ROOT=%ROOT_DIR%\kimodo"
+) else (
+  >&2 echo [ERROR] Invalid project root: %ROOT_DIR%
+  exit /b 1
+)
+set "PYTHONPATH=%SOURCE_ROOT%"
+
+if exist "%SETUP_LOCK_FILE%" (
+  >&2 echo [ERROR] Setup is still running: %SETUP_LOCK_FILE%
+  >&2 echo [ERROR] Please wait until setup lock is removed, then retry.
+  exit /b 1
+)
+if not exist "%SETUP_SCRIPT%" (
+  >&2 echo [ERROR] Missing setup script: %SETUP_SCRIPT%
+  exit /b 1
+)
+
+call :ensure_setup_ready
+if not "%ERRORLEVEL%"=="0" exit /b 1
+
+set "VENV_PY=%ROOT_DIR%\.venv\Scripts\python.exe"
+if not exist "%VENV_PY%" (
+  >&2 echo [ERROR] Missing venv python: %VENV_PY%
+  >&2 echo [ERROR] Please rerun setup_kimodo_offline.bat.
+  exit /b 1
+)
+if not exist "%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors" (
+  >&2 echo [ERROR] Missing checkpoint: %ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors
+  >&2 echo [ERROR] Please rerun setup_kimodo_offline.bat.
+  exit /b 1
+)
+set "META_MODEL_DIR=%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct"
+set "NF4_MODEL_DIR=%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4"
+set "SELECTED_TEXT_ENCODER_DIR="
+
+if exist "%META_MODEL_DIR%\model.safetensors.index.json" set "SELECTED_TEXT_ENCODER_DIR=%META_MODEL_DIR%"
+if not defined SELECTED_TEXT_ENCODER_DIR if exist "%META_MODEL_DIR%\model.safetensors" set "SELECTED_TEXT_ENCODER_DIR=%META_MODEL_DIR%"
+
+if not defined SELECTED_TEXT_ENCODER_DIR (
+  if not exist "%NF4_MODEL_DIR%\model.safetensors" (
+    if exist "%ROOT_DIR%\models\LLM-Research\KIMODO-Meta3_llm2vec_NF4\model.safetensors" (
+      if not exist "%NF4_MODEL_DIR%" mkdir "%NF4_MODEL_DIR%"
+      robocopy "%ROOT_DIR%\models\LLM-Research\KIMODO-Meta3_llm2vec_NF4" "%NF4_MODEL_DIR%" /E /NFL /NDL /NJH /NJS /NC /NS >nul
+    )
+  )
+  if not exist "%NF4_MODEL_DIR%\model.safetensors" (
+    if exist "%OFFLINE_ASSETS%\models\LLM-Research\KIMODO-Meta3_llm2vec_NF4\model.safetensors" (
+      if not exist "%NF4_MODEL_DIR%" mkdir "%NF4_MODEL_DIR%"
+      robocopy "%OFFLINE_ASSETS%\models\LLM-Research\KIMODO-Meta3_llm2vec_NF4" "%NF4_MODEL_DIR%" /E /NFL /NDL /NJH /NJS /NC /NS >nul
+    )
+  )
+  if exist "%NF4_MODEL_DIR%\model.safetensors" set "SELECTED_TEXT_ENCODER_DIR=%NF4_MODEL_DIR%"
+)
+
+if not defined SELECTED_TEXT_ENCODER_DIR (
+  >&2 echo [ERROR] Missing text encoder models under:
+  >&2 echo [ERROR]   %META_MODEL_DIR%
+  >&2 echo [ERROR]   %NF4_MODEL_DIR%
+  >&2 echo [ERROR] Please rerun setup_kimodo_offline.bat.
+  exit /b 1
+)
+
+set "CHECKPOINT_DIR=%OFFLINE_ASSETS%\models"
+set "HF_HOME=%OFFLINE_ASSETS%\hf_cache"
+set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
+set "HUGGINGFACE_HUB_CACHE=%HF_HOME%\hub"
+set "HF_HUB_CACHE=%HF_HOME%\hub"
+set "TRANSFORMERS_OFFLINE=1"
+set "HF_HUB_OFFLINE=1"
+set "HF_DATASETS_OFFLINE=1"
+set "LOCAL_CACHE=true"
+set "TEXT_ENCODER_MODE=local"
+set "KIMODO_ROOT_PATH=%ROOT_DIR%"
+set "PYTHONUNBUFFERED=1"
+rem Force source_root first so Python resolves real kimodo package instead of namespace parent.
+
+if not exist "%HF_HOME%" mkdir "%HF_HOME%"
+if not exist "%TRANSFORMERS_CACHE%" mkdir "%TRANSFORMERS_CACHE%"
+if not exist "%HUGGINGFACE_HUB_CACHE%" mkdir "%HUGGINGFACE_HUB_CACHE%"
+
+set "EMBED_DIR=%SELECTED_TEXT_ENCODER_DIR%"
+
+rem llm2vec wrapper now resolves model paths dynamically via KIMODO_ROOT_PATH; no patch step needed.
+
+pushd "%ROOT_DIR%" >nul
+if not "%ERRORLEVEL%"=="0" (
+  >&2 echo [ERROR] Cannot enter ROOT_DIR: %ROOT_DIR%
+  exit /b 1
+)
+"%VENV_PY%" -c "import numpy; import kimodo; print('runtime_ok')" >nul 2>nul
+if not "%ERRORLEVEL%"=="0" (
+  >&2 echo [ERROR] Runtime deps missing in venv ^(at least numpy/kimodo import failed^).
+  >&2 echo [ERROR] Please run setup_kimodo_offline.bat again or install missing pip deps.
+  popd >nul
+  exit /b 1
+)
+"%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_NAME%" --kimodo-root "%ROOT_DIR%"
+set "EXIT_CODE=%ERRORLEVEL%"
+popd >nul
+exit /b %EXIT_CODE%
+
+:ensure_setup_ready
+set "NEED_SETUP=0"
+if not exist "%SETUP_SENTINEL%" set "NEED_SETUP=1"
+if not exist "%SETUP_RUN_MARKER%" set "NEED_SETUP=1"
+if not exist "%ROOT_DIR%\.venv\Scripts\python.exe" set "NEED_SETUP=1"
+if exist "%ROOT_DIR%\.venv\Scripts\python.exe" (
+  "%ROOT_DIR%\.venv\Scripts\python.exe" -c "import numpy; import kimodo" >nul 2>nul
+  if not "%ERRORLEVEL%"=="0" set "NEED_SETUP=1"
+)
+if not exist "%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors" set "NEED_SETUP=1"
+if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" if not exist "%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4\model.safetensors" set "NEED_SETUP=1"
+
+if "%NEED_SETUP%"=="0" (
+  echo [INFO] Setup sentinel found. Skip setup.
+  exit /b 0
+)
+
+echo [STEP] Setup is not complete. Running setup first...
+>&2 echo [Kimodo] First-time setup detected. Initial configuration may take 10-20 minutes. Please wait patiently.
+call "%SETUP_SCRIPT%"
+if not "%ERRORLEVEL%"=="0" (
+  >&2 echo [ERROR] Setup failed. See %ROOT_DIR%\setup_kimodo_offline.log
+  exit /b 1
+)
+if not exist "%SETUP_SENTINEL%" (
+  >&2 echo [ERROR] Setup finished without sentinel: %SETUP_SENTINEL%
+  exit /b 1
+)
+echo [INFO] Setup completed.
+exit /b 0
+

@@ -29,51 +29,58 @@ function Start-CloneJob {
     Start-Job -ScriptBlock {
         param($RepoUrl, $DestDir, $RequiredFiles)
         $ErrorActionPreference = "Stop"
+        $tag = "[clonemodel_async.ps1]"
 
-        $allReady = $true
-        foreach ($rel in $RequiredFiles) {
-            $fp = Join-Path $DestDir $rel
-            if (-not (Test-Path -LiteralPath $fp)) {
-                $allReady = $false
-                break
+        try {
+            $allReady = $true
+            foreach ($rel in $RequiredFiles) {
+                $fp = Join-Path $DestDir $rel
+                if (-not (Test-Path -LiteralPath $fp)) {
+                    $allReady = $false
+                    break
+                }
             }
-        }
-        if ($allReady) {
-            Write-Output ("[INFO] Skip existing model: " + $DestDir)
-            return
-        }
+            if ($allReady) {
+                Write-Output ("$tag [INFO] Skip existing model: " + $DestDir)
+                return [pscustomobject]@{ __ok = $true; __dest = $DestDir }
+            }
 
-        if (-not (Test-Path -LiteralPath $DestDir)) {
-            Write-Output ("[STEP] Cloning " + $RepoUrl)
-            & git clone $RepoUrl $DestDir
+            if (-not (Test-Path -LiteralPath $DestDir)) {
+                Write-Output ("$tag [STEP] Cloning " + $RepoUrl)
+                & git clone $RepoUrl $DestDir 2>&1 | ForEach-Object { Write-Output "$tag $_" }
+                if ($LASTEXITCODE -ne 0) {
+                    throw ("git clone failed: " + $RepoUrl)
+                }
+            }
+            else {
+                if (-not (Test-Path -LiteralPath (Join-Path $DestDir ".git"))) {
+                    throw ("[ERROR] Destination exists but is not a git repo: " + $DestDir)
+                }
+                Write-Output ("$tag [STEP] Updating existing repo: " + $DestDir)
+                & git -C $DestDir pull 2>&1 | ForEach-Object { Write-Output "$tag $_" }
+                if ($LASTEXITCODE -ne 0) {
+                    throw ("git pull failed: " + $DestDir)
+                }
+            }
+
+            & git -C $DestDir lfs pull 2>&1 | ForEach-Object { Write-Output "$tag $_" }
             if ($LASTEXITCODE -ne 0) {
-                throw ("git clone failed: " + $RepoUrl)
+                throw ("git lfs pull failed: " + $DestDir)
             }
-        }
-        else {
-            if (-not (Test-Path -LiteralPath (Join-Path $DestDir ".git"))) {
-                throw ("[ERROR] Destination exists but is not a git repo: " + $DestDir)
-            }
-            Write-Output ("[STEP] Updating existing repo: " + $DestDir)
-            & git -C $DestDir pull
-            if ($LASTEXITCODE -ne 0) {
-                throw ("git pull failed: " + $DestDir)
-            }
-        }
 
-        & git -C $DestDir lfs pull
-        if ($LASTEXITCODE -ne 0) {
-            throw ("git lfs pull failed: " + $DestDir)
-        }
-
-        foreach ($rel in $RequiredFiles) {
-            $fp = Join-Path $DestDir $rel
-            if (-not (Test-Path -LiteralPath $fp)) {
-                throw ("[ERROR] Missing " + $rel + " after clone: " + $DestDir)
+            foreach ($rel in $RequiredFiles) {
+                $fp = Join-Path $DestDir $rel
+                if (-not (Test-Path -LiteralPath $fp)) {
+                    throw ("[ERROR] Missing " + $rel + " after clone: " + $DestDir)
+                }
             }
-        }
 
-        Write-Output ("[OK] Ready: " + $DestDir)
+            Write-Output ("$tag [OK] Ready: " + $DestDir)
+            return [pscustomobject]@{ __ok = $true; __dest = $DestDir }
+        }
+        catch {
+            return [pscustomobject]@{ __ok = $false; __dest = $DestDir; __error = ($_ | Out-String) }
+        }
     } -ArgumentList $RepoUrl, $DestDir, $RequiredFiles
 }
 
@@ -90,12 +97,20 @@ $jobs += Start-CloneJob -RepoUrl "https://www.modelscope.cn/oneyoungmean/KIMODO-
 $failed = $false
 foreach ($job in $jobs) {
     Wait-Job -Job $job | Out-Null
-    try {
-        Receive-Job -Job $job -ErrorAction Stop
-    }
-    catch {
-        Write-Error $_
-        $failed = $true
+    $items = Receive-Job -Job $job
+    foreach ($item in $items) {
+        if ($item -is [string]) {
+            Write-Output $item
+            continue
+        }
+        if ($item.PSObject.Properties.Match("__ok").Count -gt 0) {
+            if (-not $item.__ok) {
+                $failed = $true
+                Write-Output ("[clonemodel_async.ps1] [ERROR] " + $item.__error)
+            }
+            continue
+        }
+        Write-Output $item
     }
     if ($job.State -ne "Completed") {
         $failed = $true

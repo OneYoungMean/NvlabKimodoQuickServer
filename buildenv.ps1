@@ -9,15 +9,15 @@ if (-not (Test-Path -LiteralPath $RootDir)) {
     throw "[ERROR]$tag Invalid RootDir: $RootDir"
 }
 
-$legacyBat = Join-Path $RootDir "setup_kimodo_offline_legacy.bat"
+$legacyBat = Join-Path $RootDir "setup_kimodo_offline_impl.bat"
 if (-not (Test-Path -LiteralPath $legacyBat)) {
-    throw "[ERROR]$tag Missing legacy setup script: $legacyBat"
+    throw "[ERROR]$tag Missing setup impl script: $legacyBat"
 }
 
-Write-Output "[STEP]$tag Running buildenv stage via legacy setup in buildenv-only mode..."
+Write-Output "[STEP]$tag Running buildenv stage via setup impl in buildenv-only mode..."
 $env:KIMODO_BUILDENV_ONLY = "1"
 try {
-    & cmd.exe /d /c "`"$legacyBat`""
+    & cmd.exe /d /c "cd /d `"$RootDir`" && `"$legacyBat`""
     if ($LASTEXITCODE -ne 0) {
         throw "[ERROR]$tag Buildenv stage failed with exit code: $LASTEXITCODE"
     }
@@ -28,3 +28,5 @@ finally {
 
 Write-Output "[OK]$tag Buildenv stage completed."
 exit 0
+
+
