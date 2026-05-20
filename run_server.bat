@@ -95,8 +95,15 @@ if exist "%PORT_FILE%" (
     call :shutdown_existing
     if errorlevel 1 exit /b 1
   ) else (
-    echo [INFO] Existing server already running with same params: %CUR_SIG%
-    exit /b 0
+    call :probe_existing_server
+    if errorlevel 1 (
+      echo [WARN] Existing server signature matches, but probe failed. Restarting...
+      call :shutdown_existing
+      if errorlevel 1 exit /b 1
+    ) else (
+      echo [INFO] Existing server already running with same params: %CUR_SIG%
+      exit /b 0
+    )
   )
 )
 
@@ -231,10 +238,27 @@ if not exist "%PORT_FILE%" exit /b 0
 ping 127.0.0.1 -n 2 >nul
 set /a WAIT_SEC+=1
 if !WAIT_SEC! geq 30 (
-  echo [ERROR] Timeout waiting previous server to stop.
-  exit /b 1
+  echo [WARN] Timeout waiting previous server to stop.
+  echo [WARN] Archiving stale serverport and continuing restart.
+  call :archive_file "%PORT_FILE%"
+  exit /b 0
 )
 goto wait_old_exit
+
+:probe_existing_server
+set "PHOST="
+set "PPORT="
+for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
+  set "PHOST=%%A"
+  set "PPORT=%%B"
+)
+if not defined PHOST exit /b 1
+if not defined PPORT exit /b 1
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop'; $h='%PHOST%'; $p=[int]%PPORT%; $c=$null; $s=$null; $w=$null; $r=$null; try { $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if(-not $iar.AsyncWaitHandle.WaitOne(2000)){ throw 'connect-timeout' }; $c.EndConnect($iar); $s=$c.GetStream(); $s.ReadTimeout=2000; $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $r=New-Object IO.StreamReader($s); $w.WriteLine('{""cmd"":""ping""}'); $line=$r.ReadLine(); if([string]::IsNullOrWhiteSpace($line)){ throw 'empty-response' }; $obj=$line | ConvertFrom-Json; if($obj.status -in @('pong','loading','ready')){ exit 0 }; throw ('bad-status:' + [string]$obj.status) } finally { if($r){$r.Close()}; if($w){$w.Close()}; if($s){$s.Close()}; if($c){$c.Close()} }" >nul 2>nul
+if errorlevel 1 exit /b 1
+exit /b 0
 
 :archive_file
 set "ARCHIVE_TARGET=%~1"

@@ -4,8 +4,8 @@ Kimodo Unity Bridge Server
 
 Persistent process for Unity Editor:
 - Loads kimodo model once
-- Receives newline-delimited JSON requests on stdin
-- Sends newline-delimited JSON responses on stdout
+- Listens on TCP socket for newline-delimited JSON requests
+- Responds with newline-delimited JSON over the same TCP connection
 """
 
 import argparse
