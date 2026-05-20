@@ -8,6 +8,13 @@ set "LOG_DIR=%ROOT_DIR%\log"
 
 set "LAUNCHER=%ROOT_DIR%\run_server.bat"
 set "MODEL=Kimodo-SOMA-RP-v1"
+if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
+set "HIGHVRAM=%KIMODO_TEST_HIGHVRAM%"
+if not defined HIGHVRAM set "HIGHVRAM=0"
+set "USE_SHARED_MODELS=%KIMODO_TEST_USE_SHARED_MODELS%"
+if not defined USE_SHARED_MODELS set "USE_SHARED_MODELS=0"
+set "SHARED_MODELS_ROOT=%KIMODO_SHARED_MODELS_ROOT%"
+if not defined SHARED_MODELS_ROOT set "SHARED_MODELS_ROOT=C:\nvlab\models"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "RUN_LOG=%LOG_DIR%\example_run_server_tpose.log"
 set "CLIENT_LOG=%LOG_DIR%\example_run_server_tpose_client.log"
@@ -16,10 +23,11 @@ set "SETUP_LOCK=%ROOT_DIR%\.setup_new.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "SERVER_STARTED=0"
 set "SERVER_PID_FILE=%TEMP%\kimodo_test_server_pid_%RANDOM%%RANDOM%.txt"
+if defined KIMODO_TEST_SERVER_PID_FILE set "SERVER_PID_FILE=%KIMODO_TEST_SERVER_PID_FILE%"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 
 set "OUTPUT_MODE=%KIMODO_TEST_OUTPUT%"
-if not defined OUTPUT_MODE set "OUTPUT_MODE=file"
+if not defined OUTPUT_MODE set "OUTPUT_MODE=console"
 for /f "tokens=* delims= " %%A in ("%OUTPUT_MODE%") do set "OUTPUT_MODE=%%A"
 for /l %%I in (1,1,4) do if "!OUTPUT_MODE:~-1!"==" " set "OUTPUT_MODE=!OUTPUT_MODE:~0,-1!"
 set "WAIT_TIMEOUT_SEC="
@@ -36,7 +44,14 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
 echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODEL=%MODEL%
+echo [TEST] HIGHVRAM=%HIGHVRAM%
+echo [TEST] USE_SHARED_MODELS=%USE_SHARED_MODELS%
 echo [TEST] MODE=%OUTPUT_MODE%
+
+if /I "%USE_SHARED_MODELS%"=="1" (
+  call :stage_shared_models
+  if errorlevel 1 exit /b 1
+)
 
 call :decide_wait_timeout
 echo [TEST] WAIT_TIMEOUT_SEC=%WAIT_TIMEOUT_SEC%
@@ -64,6 +79,23 @@ if exist "%PORT_FILE%" (
   )
 )
 if defined HOST if defined PORT goto got_port
+call :check_server_process_alive
+if errorlevel 1 (
+  echo [ERROR] Background run_server process exited before serverport was ready.
+  if exist "%RUN_LOG%" (
+    echo [TEST] run_server log tail:
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%RUN_LOG%'; if(Test-Path -LiteralPath $p){Get-Content -LiteralPath $p -Tail 120}"
+  )
+  if exist "%LOG_DIR%\setup.log" (
+    echo [TEST] setup log tail:
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%LOG_DIR%\setup.log'; if(Test-Path -LiteralPath $p){Get-Content -LiteralPath $p -Tail 80}"
+  )
+  if exist "%LOG_DIR%\download_model.log" (
+    echo [TEST] download log tail:
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%LOG_DIR%\download_model.log'; if(Test-Path -LiteralPath $p){Get-Content -LiteralPath $p -Tail 80}"
+  )
+  exit /b 1
+)
 
 call :sleep_1s_or_cancel
 if errorlevel 1 goto user_cancelled
@@ -153,15 +185,30 @@ exit /b 0
 
 :launch_server_background
 call :archive_file "%SERVER_PID_FILE%"
-set "LAUNCH_ARGS=--model \"%MODEL%\" --output console"
-if /I "%OUTPUT_MODE%"=="file" set "LAUNCH_ARGS=--model \"%MODEL%\" --output file --log \"%RUN_LOG%\""
-set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $args='%LAUNCH_ARGS%'; $cmdArg='/d /c ""' + $launcher + '"" ' + $args; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArg -WorkingDirectory $wd -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+call :archive_file "%RUN_LOG%"
+if /I "%OUTPUT_MODE%"=="file" (
+  set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+) else (
+  set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','console'); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+)
 call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
 if errorlevel 1 (
   echo [ERROR] launch_server_background failed.
   exit /b 1
 )
 set "SERVER_STARTED=1"
+exit /b 0
+
+:check_server_process_alive
+if not exist "%SERVER_PID_FILE%" exit /b 0
+set "SPID="
+for /f "usebackq delims=" %%A in ("%SERVER_PID_FILE%") do (
+  if not defined SPID set "SPID=%%A"
+)
+if not defined SPID exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$pidValue='%SPID%'; if($pidValue -notmatch '^\d+$'){ exit 1 }; $p=Get-Process -Id ([int]$pidValue) -ErrorAction SilentlyContinue; if($null -eq $p){ exit 1 }; exit 0" >nul 2>nul
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :try_kill_server_pid
@@ -175,6 +222,66 @@ if defined SPID (
     "$ErrorActionPreference='SilentlyContinue'; $pidValue='%SPID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
 )
 call :archive_file "%SERVER_PID_FILE%"
+exit /b 0
+
+:stage_shared_models
+if not exist "%SHARED_MODELS_ROOT%" (
+  echo [ERROR] Shared models root not found: %SHARED_MODELS_ROOT%
+  exit /b 1
+)
+if not exist "%ROOT_DIR%\models" mkdir "%ROOT_DIR%\models" >nul 2>nul
+call :resolve_model_alias "%MODEL%"
+if errorlevel 1 exit /b 1
+call :copy_model_dir "%SHARED_MODELS_ROOT%\%MODEL_DIR_NAME%" "%ROOT_DIR%\models\%MODEL_DIR_NAME%"
+if errorlevel 1 exit /b 1
+if /I "%HIGHVRAM%"=="1" (
+  call :copy_model_dir "%SHARED_MODELS_ROOT%\Meta-Llama-3-8B-Instruct" "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct"
+  if errorlevel 1 exit /b 1
+  call :copy_model_dir "%SHARED_MODELS_ROOT%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised" "%ROOT_DIR%\models\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
+  if errorlevel 1 exit /b 1
+) else (
+  call :copy_model_dir "%SHARED_MODELS_ROOT%\KIMODO-Meta3_llm2vec_NF4" "%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4"
+  if errorlevel 1 exit /b 1
+)
+echo [TEST] Shared models staged from %SHARED_MODELS_ROOT%.
+exit /b 0
+
+:copy_model_dir
+set "SRC_DIR=%~1"
+set "DST_DIR=%~2"
+if not exist "%SRC_DIR%" (
+  echo [ERROR] Shared model source missing: %SRC_DIR%
+  exit /b 1
+)
+if not exist "%DST_DIR%" mkdir "%DST_DIR%" >nul 2>nul
+robocopy "%SRC_DIR%" "%DST_DIR%" /E /R:1 /W:1 /NFL /NDL /NJH /NJS >nul
+set "RBC=%ERRORLEVEL%"
+if %RBC% GEQ 8 (
+  echo [ERROR] Failed to stage model directory: %SRC_DIR%
+  exit /b 1
+)
+exit /b 0
+
+:resolve_model_alias
+set "INPUT_MODEL=%~1"
+set "MODEL_DIR_NAME=%INPUT_MODEL%"
+if /I "%MODEL_DIR_NAME%"=="soma" set "MODEL_DIR_NAME=Kimodo-SOMA-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="soma-rp" set "MODEL_DIR_NAME=Kimodo-SOMA-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="kimodo-soma-rp" set "MODEL_DIR_NAME=Kimodo-SOMA-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="g1" set "MODEL_DIR_NAME=Kimodo-G1-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="g1-rp" set "MODEL_DIR_NAME=Kimodo-G1-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="kimodo-g1-rp" set "MODEL_DIR_NAME=Kimodo-G1-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="soma-seed" set "MODEL_DIR_NAME=Kimodo-SOMA-SEED-v1"
+if /I "%MODEL_DIR_NAME%"=="kimodo-soma-seed" set "MODEL_DIR_NAME=Kimodo-SOMA-SEED-v1"
+if /I "%MODEL_DIR_NAME%"=="g1-seed" set "MODEL_DIR_NAME=Kimodo-G1-SEED-v1"
+if /I "%MODEL_DIR_NAME%"=="kimodo-g1-seed" set "MODEL_DIR_NAME=Kimodo-G1-SEED-v1"
+if /I "%MODEL_DIR_NAME%"=="smplx" set "MODEL_DIR_NAME=Kimodo-SMPLX-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="smplx-rp" set "MODEL_DIR_NAME=Kimodo-SMPLX-RP-v1"
+if /I "%MODEL_DIR_NAME%"=="kimodo-smplx-rp" set "MODEL_DIR_NAME=Kimodo-SMPLX-RP-v1"
+if not "%MODEL_DIR_NAME:~0,7%"=="Kimodo-" (
+  echo [ERROR] Unsupported model alias: %INPUT_MODEL%
+  exit /b 1
+)
 exit /b 0
 
 :archive_file

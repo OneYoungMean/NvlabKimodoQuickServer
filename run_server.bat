@@ -131,10 +131,6 @@ if not exist "%ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors" (
   echo [ERROR] Missing model file: %ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors
   exit /b 1
 )
-if not exist "%KIMODO_LLM2VEC_DIR%\model.safetensors" (
-  echo [ERROR] Missing text encoder model: %KIMODO_LLM2VEC_DIR%\model.safetensors
-  exit /b 1
-)
 if "%HIGHVRAM%"=="1" (
   if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" (
     echo [ERROR] Missing Meta-Llama model under %ROOT_DIR%\models\Meta-Llama-3-8B-Instruct
@@ -142,6 +138,11 @@ if "%HIGHVRAM%"=="1" (
   )
   if not exist "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors" if not exist "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors" (
     echo [ERROR] Missing LLM2Vec PEFT model under %KIMODO_LLM2VEC_PEFT_DIR%
+    exit /b 1
+  )
+) else (
+  if not exist "%KIMODO_LLM2VEC_DIR%\model.safetensors" (
+    echo [ERROR] Missing text encoder model: %KIMODO_LLM2VEC_DIR%\model.safetensors
     exit /b 1
   )
 )
