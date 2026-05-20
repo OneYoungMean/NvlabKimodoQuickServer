@@ -1,88 +1,176 @@
-# NvlabKimodoQuickServer（中文说明）
+﻿# NvlabKimodoQuickServer（中文）
 
-这是 Kimodo Bridge Server 的 Windows 离线启动方案（新管线）：
-- `setup.bat`（仅环境）
-- `download_model.bat`（模型下载/更新）
-- `run_server.bat` / `start_server.bat`（启动服务）
-- `test\test_run_server_tpose.bat`（冒烟测试）
+这是 Kimodo 的新桥接运行时管线目录，目标是给 AI/工程脚本一个稳定、可自动化的 setup + download + run + test 入口。
 
-历史脚本已归档到 `obstacle\`。
+## 作用
+
+- 构建并校验运行环境：`setup.bat`
+- 下载/更新模型资源：`download_model.bat`
+- 按模型与显存模式启动服务：`run_server.bat` / `start_server.bat`
+- 通过 TCP 冒烟测试验证链路：`test\test_run_server_tpose.bat`
+
+## 与旧管线差异（表格）
+
+| 对比项 | 新管线（本目录） | 旧管线（归档在 `obstacle\`） |
+|---|---|---|
+| setup 职责 | 仅环境构建 | 环境与模型流程耦合在一起 |
+| 模型下载时机 | 独立 `download_model.bat`，并在 run/start 内自动调用 | 多数在 setup 链路里触发 |
+| 重复启动行为 | 记录参数签名：同参复用、异参先 `quit` 再重启 | 缺少等价的签名重启机制 |
+| highvram 控制 | `--highvram` 显式参数 | 旧流程偏文件存在性自动判断 |
+| git 依赖处理 | Windows 下可本地便携安装 git/git-lfs | 通常要求系统预装 |
+| 测试入口 | `test\test_run_server_tpose.bat` | 旧测试脚本已归档 |
 
 ## 快速开始
 
-在 `C:\nvlab\NvlabKimodoQuickServer` 下执行：
+在 `C:\nvlab\NvlabKimodoQuickServer` 执行：
 
 ```bat
 setup.bat --output console
 start_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
 
-或直接测试：
+测试：
 
 ```bat
 test\test_run_server_tpose.bat
 ```
 
-## 脚本职责
+## 入口脚本
+
+- `setup.bat`
+- `download_model.bat`
+- `run_server.bat`
+- `start_server.bat`
+- `test\test_run_server_tpose.bat`
+
+新增 `.sh` 包装入口：
+
+- `setup.sh`
+- `download_model.sh`
+- `run_server.sh`
+- `start_server.sh`
+- `test\test_run_server_tpose.sh`
+
+说明：这些 `.sh` 是通过 `cmd.exe` 调用对应 `.bat`，适合 Git Bash/WSL-on-Windows。纯 Linux（没有 `cmd.exe`）不支持直接使用这些包装脚本。
+
+## 服务协议
+
+桥接服务模块：
+- `kimodo.bridge.bridge_server`
+
+传输方式：
+- TCP
+- 按行 JSON（newline-delimited JSON）
+
+命令：
+
+1. `ping`
+```json
+{"cmd":"ping"}
+```
+返回：`pong` / `loading` / `error`
+
+2. `generate`
+```json
+{
+  "cmd":"generate",
+  "prompt":"tpose",
+  "duration":5.0,
+  "seed":42,
+  "diffusion_steps":100,
+  "constraints_json":""
+}
+```
+成功返回：`done` + `motion_json_compact`
+
+3. `quit`
+```json
+{"cmd":"quit"}
+```
+返回：`bye`
+
+常见状态：
+- `initializing`
+- `loading`
+- `ready`
+- `progress`
+- `pong`
+- `done`
+- `bye`
+- `error`
+
+## 参数与模型切换
 
 ### `setup.bat`
-
-单线程环境构建，仅处理运行环境：
-1. 准备 Python 与 `.venv`
-2. 安装依赖
-3. 运行导入检查
-4. 写入 `.setup_new_complete`
-
-参数：
 - `--output console|file`
 - `--log <path>`
 - `--force`
 
 ### `download_model.bat`
-
-单线程模型下载与更新。
-
-参数：
-- `--model <name>`：指定 Kimodo 模型（支持别名 `soma`/`g1`/`smplx` 等）
-- `--highvram`：启用全量文本编码器模式
-- 默认（不加 `--highvram`）：使用 `KIMODO-Meta3_llm2vec_NF4`
-- `--unlock-stale`：旋转陈旧 git lock
-- `--force`：即使文件存在也强制同步
+- `--model <name>`
+- `--highvram`
+- `--target <all|soma|nf4>`
+- `--unlock-stale`
+- `--force`
 - `--output console|file`
 - `--log <path>`
 
-高显存相关仓库：
-- `Meta-Llama-3-8B-Instruct`：`https://www.modelscope.cn/models/LLM-Research/Meta-Llama-3-8B-Instruct`
-- `LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised`：`https://www.modelscope.cn/models/oneyoungmean/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised`
-
 ### `run_server.bat` / `start_server.bat`
+- `--model <name>`
+- `--highvram`
+- `--output console|file`
+- `--log <path>`
+- `--force-setup`
 
-`start_server.bat` 是 `run_server.bat` 的入口封装。
+模型名示例：
+- `Kimodo-SOMA-RP-v1`
+- `Kimodo-G1-RP-v1`
+- `Kimodo-SMPLX-RP-v1`
+- `Kimodo-SOMA-SEED-v1`
+- `Kimodo-G1-SEED-v1`
+- 以及别名：`soma` / `g1` / `smplx` / `soma-seed`
 
-执行流程：
-1. 若未 setup，则先跑 `setup.bat`
-2. 调用 `download_model.bat`（按 `--model` / `--highvram`）
-3. 启动 `kimodo.bridge.bridge_server`
+## 服务启动配置行为
+
+`run_server.bat` 会执行：
+
+1. 校验 setup 哨兵 `.setup_new_complete`
+2. 缺失则先跑 setup
+3. 按模型/显存模式下载模型
+4. 注入本地运行环境变量（`HF_HOME`、offline flags、`CHECKPOINT_DIR`、`KIMODO_ROOT_PATH` 等）
+5. 启动 `python -m kimodo.bridge.bridge_server`
 
 重复启动策略：
-- 参数相同且已有服务：直接退出（复用）
-- 参数变化：先发送 `quit` 关闭旧服务，再重建并启动
+- 参数签名相同 + `serverport` 存在：直接复用
+- 参数签名变化 + `serverport` 存在：先发 `quit` 再重启
 
-### `test\test_run_server_tpose.bat`
+## 测试位置与内容
 
-测试流程：
-1. 启动 `start_server.bat`
-2. 等待 `serverport`
-3. 发送 `ping -> generate(tpose) -> quit`
-4. 收到 `status=done` 判定成功
+主测试脚本：
+- `test\test_run_server_tpose.bat`
+- 对应 `.sh`：`test\test_run_server_tpose.sh`
 
-超时：
+验证内容：
+- 拉起服务
+- 等待 `serverport`
+- 发 `ping -> generate(tpose) -> quit`
+- 检查是否出现 `status=done`
+
+超时规则：
 - 需要 setup/下载时：`1800s`
 - 已就绪时：`60s`
 - 可用 `KIMODO_TEST_WAIT_TIMEOUT_SEC` 覆盖
 
-## 说明
+## 注意事项
 
-- `download_model.bat` 会先检查 `git` 与 `git lfs`。
-- Windows 下若缺失，会在项目 `tools\` 目录自动准备便携版（仅当前脚本上下文注入 PATH，不修改系统/用户全局 PATH）。
-- Linux 环境不会自动安装便携 git；若 Linux 缺少 git/git-lfs，请先用系统包管理器安装。
+- Windows 下 `download_model.bat` 会先检查 `git/git-lfs`，缺失时可在 `tools\` 下准备便携版，不改全局 PATH。
+- ModelScope `.../models/...` 地址会自动归一化到可 clone 的 git URL。
+- 当前脚本特意保持单线程，优先稳定性。
+
+## 已知问题
+
+- `.sh` 仅是 Windows 包装入口，不是原生 Linux 启动脚本。
+- 网络受限时，git clone/lfs pull 可能失败（特别是大模型仓库）。
+- 模型目录半残状态可能需要 `--force` 或 `--unlock-stale`。
+- 如果旧服务未正常退出，可能需要手动排查 `serverport` 与旧进程状态。
+

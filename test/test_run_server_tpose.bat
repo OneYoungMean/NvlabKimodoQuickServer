@@ -5,7 +5,7 @@ set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%\.."
 
-set "LAUNCHER=%ROOT_DIR%\start_server.bat"
+set "LAUNCHER=%ROOT_DIR%\run_server.bat"
 set "MODEL=Kimodo-SOMA-RP-v1"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "RUN_LOG=%ROOT_DIR%\test_run_server_tpose.log"
