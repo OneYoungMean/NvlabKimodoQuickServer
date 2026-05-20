@@ -33,50 +33,6 @@ function Get-CommandPathOrNull {
   }
 }
 
-function Invoke-Download {
-  param(
-    [string]$Url,
-    [string]$OutFile
-  )
-  $ua = @{
-    'User-Agent' = 'NvlabKimodoQuickServer-Bootstrap'
-  }
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -Headers $ua
-}
-
-function Get-GitLfsDownloadUrl {
-  $releaseApi = 'https://api.github.com/repos/git-lfs/git-lfs/releases/latest'
-  $ua = @{
-    'User-Agent' = 'NvlabKimodoQuickServer-Bootstrap'
-  }
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  $release = Invoke-RestMethod -Uri $releaseApi -Headers $ua
-  $asset = $release.assets |
-    Where-Object { $_.name -match '^git-lfs-windows-amd64-v.*\.zip$' } |
-    Select-Object -First 1
-  if (-not $asset) {
-    throw 'No git-lfs windows amd64 zip asset found in latest release.'
-  }
-  return $asset.browser_download_url
-}
-
-function Get-MinGitDownloadUrl {
-  $releaseApi = 'https://api.github.com/repos/git-for-windows/git/releases/latest'
-  $ua = @{
-    'User-Agent' = 'NvlabKimodoQuickServer-Bootstrap'
-  }
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  $release = Invoke-RestMethod -Uri $releaseApi -Headers $ua
-  $asset = $release.assets |
-    Where-Object { $_.name -match '^MinGit-.*-64-bit\.zip$' } |
-    Select-Object -First 1
-  if (-not $asset) {
-    throw 'No MinGit 64-bit zip asset found in latest release.'
-  }
-  return $asset.browser_download_url
-}
-
 function Emit-EnvFile {
   param(
     [string]$Path,
@@ -113,86 +69,31 @@ function Emit-EnvFile {
 }
 
 $isWindows = $env:OS -eq 'Windows_NT'
-$toolsDir = Join-Path $RootDir 'tools'
-$portableGitDir = Join-Path $toolsDir 'PortableGit'
-$portableGitCmd = Join-Path $portableGitDir 'cmd'
-$portableGitMingwBin = Join-Path $portableGitDir 'mingw64\bin'
-$portableLfsBin = $portableGitMingwBin
-$portableGitExe = Join-Path $portableGitCmd 'git.exe'
-$portableLfsExe = Join-Path $portableLfsBin 'git-lfs.exe'
+$exeRoot = Join-Path $RootDir 'program\exe'
+$localGitCmd = Join-Path $exeRoot 'git\cmd'
+$localGitMingw = Join-Path $exeRoot 'git\mingw32\bin'
+$localGitExe = Join-Path $localGitCmd 'git.exe'
+$localLfsExe = Join-Path $localGitMingw 'git-lfs.exe'
 
-$gitCmd = Get-CommandPathOrNull -Command 'git'
-$lfsCmd = Get-CommandPathOrNull -Command 'git-lfs'
-
-if (-not $gitCmd -and -not $isWindows) {
-  throw 'git is missing and auto portable install is only implemented for Windows. On Linux, install git + git-lfs first.'
+if (-not $isWindows) {
+  throw 'Linux/macOS detected. Please confirm whether to install/provide local git/git-lfs under program/exe before continuing.'
 }
 
-if (-not $gitCmd -and $isWindows) {
-  Write-Log '[STEP] git not found, installing local portable git...'
-  Ensure-Dir -Path $toolsDir
-
-  $downloadDir = Join-Path $toolsDir 'downloads'
-  Ensure-Dir -Path $downloadDir
-
-  $gitZip = Join-Path $downloadDir 'MinGit-64-bit.zip'
-  $tmpExtract = Join-Path $downloadDir ('MinGit_extract_' + [Guid]::NewGuid().ToString('N'))
-  Ensure-Dir -Path $tmpExtract
-
-  $minGitUrl = Get-MinGitDownloadUrl
-  Invoke-Download -Url $minGitUrl -OutFile $gitZip
-  Expand-Archive -Path $gitZip -DestinationPath $tmpExtract -Force
-
-  if (Test-Path -LiteralPath $portableGitDir) {
-    $bak = $portableGitDir + '.bak.' + (Get-Date -Format 'yyyyMMddHHmmss')
-    Move-Item -LiteralPath $portableGitDir -Destination $bak
-  }
-
-  New-Item -ItemType Directory -Path $portableGitDir | Out-Null
-  Copy-Item -Path (Join-Path $tmpExtract '*') -Destination $portableGitDir -Recurse -Force
+if (-not (Test-Path -LiteralPath $localGitExe)) {
+  throw "Local git missing: $localGitExe"
+}
+if (-not (Test-Path -LiteralPath $localLfsExe)) {
+  throw "Local git-lfs missing: $localLfsExe"
 }
 
-if (-not $lfsCmd -and $isWindows) {
-  Write-Log '[STEP] git-lfs not found, installing local git-lfs...'
-  Ensure-Dir -Path $toolsDir
-
-  $downloadDir = Join-Path $toolsDir 'downloads'
-  Ensure-Dir -Path $downloadDir
-
-  $lfsZip = Join-Path $downloadDir 'git-lfs-windows-amd64.zip'
-  $tmpExtract = Join-Path $downloadDir ('gitlfs_extract_' + [Guid]::NewGuid().ToString('N'))
-  Ensure-Dir -Path $tmpExtract
-
-  $lfsUrl = Get-GitLfsDownloadUrl
-  Invoke-Download -Url $lfsUrl -OutFile $lfsZip
-  Expand-Archive -Path $lfsZip -DestinationPath $tmpExtract -Force
-
-  $lfsBinSource = Get-ChildItem -Path $tmpExtract -Recurse -Filter 'git-lfs.exe' | Select-Object -First 1
-  if (-not $lfsBinSource) {
-    throw 'git-lfs.exe not found after extraction.'
-  }
-
-  Ensure-Dir -Path $portableLfsBin
-  Copy-Item -LiteralPath $lfsBinSource.FullName -Destination $portableLfsExe -Force
-}
-
-$pathsToAdd = @()
-if (Test-Path -LiteralPath $portableGitCmd) {
-  $pathsToAdd += $portableGitCmd
-}
-if (Test-Path -LiteralPath $portableGitMingwBin) {
-  $pathsToAdd += $portableGitMingwBin
-}
-if (Test-Path -LiteralPath $portableLfsBin) {
-  $pathsToAdd += $portableLfsBin
-}
+$pathsToAdd = @($localGitCmd, $localGitMingw)
 
 if ($pathsToAdd.Count -gt 0) {
   $env:PATH = ($pathsToAdd -join ';') + ';' + $env:PATH
 }
 
 if (-not (Get-CommandPathOrNull -Command 'git')) {
-  throw 'git is still unavailable after bootstrap.'
+  throw 'Local git is still unavailable after path injection.'
 }
 
 $gitLfsOk = $false
@@ -203,10 +104,10 @@ try {
   $gitLfsOk = $false
 }
 if (-not $gitLfsOk) {
-  throw 'git-lfs is still unavailable after bootstrap.'
+  throw 'Local git-lfs is still unavailable after path injection.'
 }
 
 & git lfs install --skip-repo | Out-Null
 
 Emit-EnvFile -Path $EmitEnvFile -ExtraPaths $pathsToAdd
-Write-Log '[OK] git/git-lfs are ready in local context.'
+Write-Log '[OK] local git/git-lfs are ready in local context.'

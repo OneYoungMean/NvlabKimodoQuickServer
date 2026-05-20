@@ -8,4 +8,5 @@ if command -v cmd.exe >/dev/null 2>&1; then
 fi
 
 echo "[ERROR] cmd.exe not found. setup.sh is a Windows wrapper and requires cmd.exe." >&2
+echo "[ERROR] Linux/macOS detected. Please confirm whether to install/provide local program/exe binaries before continuing." >&2
 exit 1

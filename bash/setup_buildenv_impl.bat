@@ -49,7 +49,7 @@ del /q "%LOCK_FILE%" >nul 2>nul
 exit /b %SETUP_EXIT%
 
 :run_setup
-set "UV_BIN=%ROOT_DIR%\tools\uv\uv.exe"
+set "UV_BIN=%ROOT_DIR%\program\exe\uv\uv.exe"
 set "UV_DEFAULT_INDEX=https://pypi.org/simple"
 set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
 set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
@@ -233,10 +233,6 @@ if exist "%UV_BIN%" (
     exit /b 0
   )
 )
-uv --version >nul 2>nul
-if not errorlevel 1 (
-  set "UV_BIN=uv"
-  echo [INFO] Using system uv.
-  exit /b 0
-)
+echo [ERROR] Local uv missing or unusable: %UV_BIN%
+echo [ERROR] Please place uv.exe under program\exe\uv before running setup.
 exit /b 1

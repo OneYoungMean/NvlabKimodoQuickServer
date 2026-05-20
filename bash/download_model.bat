@@ -193,22 +193,23 @@ set "MODEL_REPO_URL=https://www.modelscope.cn/nv-community/%REPO_NAME%.git"
 exit /b 0
 
 :ensure_git
-set "GIT_HINT=%ROOT_DIR%\tools\PortableGit\cmd"
-git --version >nul 2>nul
-if not errorlevel 1 exit /b 0
+set "GIT_HINT=%ROOT_DIR%\program\exe\git\cmd"
 if exist "%GIT_HINT%\git.exe" (
   set "PATH=%GIT_HINT%;%PATH%"
   git --version >nul 2>nul
   if not errorlevel 1 exit /b 0
 )
 echo [ERROR] git not found.
-echo [ERROR] Install git or place portable git at: %GIT_HINT%
+echo [ERROR] Place local git at: %GIT_HINT%\git.exe
 exit /b 1
 
 :ensure_git_lfs
+set "LFS_HINT=%ROOT_DIR%\program\exe\git\mingw32\bin"
+if exist "%LFS_HINT%\git-lfs.exe" set "PATH=%LFS_HINT%;%PATH%"
 git lfs version >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] git-lfs not found. Please install git-lfs.
+  echo [ERROR] git-lfs not found.
+  echo [ERROR] Place local git-lfs at: %LFS_HINT%\git-lfs.exe
   exit /b 1
 )
 git lfs install --skip-repo >nul 2>nul
