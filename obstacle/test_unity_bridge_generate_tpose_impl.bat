@@ -12,14 +12,19 @@ set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%\.."
 
-set "LAUNCHER=%ROOT_DIR%\start_kimodo_bridge_offline.bat"
+set "LAUNCHER=%ROOT_DIR%\run_server.bat"
 set "MODEL=Kimodo-SOMA-RP-v1"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "LOG_FILE=%ROOT_DIR%\bridge_test_generate_tpose.log"
 set "CLIENT_LOG_FILE=%ROOT_DIR%\bridge_test_generate_tpose_client.log"
+set "SETUP_LOG_FILE=%ROOT_DIR%\setup.log"
+set "RUNTIME_LOG_FILE=%ROOT_DIR%\bridge_runtime.log"
+set "LOCK_FILE=%ROOT_DIR%\.setup_new.lock"
 set "CLIENT_PS1=%ROOT_DIR%\test\test_unity_bridge_generate_tpose_client.ps1"
 set "OUTPUT_MODE=%KIMODO_TPOSE_OUTPUT%"
 if not defined OUTPUT_MODE set "OUTPUT_MODE=console"
+set "WAIT_TIMEOUT_SEC=%KIMODO_TPOSE_WAIT_TIMEOUT_SEC%"
+if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=1800"
 
 if not exist "%LAUNCHER%" (
   echo [ERROR] Launcher not found: %LAUNCHER%
@@ -34,14 +39,18 @@ echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODEL=%MODEL%
 echo [TEST] MODE=%OUTPUT_MODE%
 echo [TEST] Request: prompt=tpose, duration=5.0, seed=42
+echo [TEST] WAIT_TIMEOUT_SEC=%WAIT_TIMEOUT_SEC%
+
+call :wait_setup_lock_clear
+if errorlevel 1 exit /b 1
 
 if exist "%PORT_FILE%" del /q "%PORT_FILE%" >nul 2>nul
 if exist "%CLIENT_LOG_FILE%" del /q "%CLIENT_LOG_FILE%" >nul 2>nul
 
 if /I "%OUTPUT_MODE%"=="file" (
-  start "kimodo_bridge_test_launcher" /b cmd /d /c ""%LAUNCHER%" --kimodo-root "%ROOT_DIR%" --model "%MODEL%" > "%LOG_FILE%" 2>&1"
+  start "kimodo_bridge_test_launcher" /b cmd /d /c ""%LAUNCHER%" --model "%MODEL%" --output file --log "%LOG_FILE%""
 ) else (
-  start "kimodo_bridge_test_launcher" /b cmd /d /c ""%LAUNCHER%" --kimodo-root "%ROOT_DIR%" --model "%MODEL%""
+  start "kimodo_bridge_test_launcher" /b cmd /d /c ""%LAUNCHER%" --model "%MODEL%" --output console"
 )
 
 set "HOST="
@@ -56,10 +65,12 @@ if exist "%PORT_FILE%" (
 )
 if defined HOST if defined PORT goto got_port
 
+call :print_waiting_status
 ping 127.0.0.1 -n 2 >nul
 set /a WAIT_SEC+=1
-if %WAIT_SEC% geq 180 (
+if !WAIT_SEC! geq !WAIT_TIMEOUT_SEC! (
   echo [ERROR] Timeout waiting for serverport file: %PORT_FILE%
+  call :print_timeout_diagnostics
   exit /b 1
 )
 goto wait_port
@@ -119,4 +130,39 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Write-Host ('[TEST] Motion frames={0}, joints={1}, fps={2}' -f $motion.num_frames,$motion.num_joints,$motion.fps)"
 
 exit /b 0
+
+:print_waiting_status
+exit /b 0
+
+:print_timeout_diagnostics
+if /I "%OUTPUT_MODE%"=="file" (
+  echo [TEST] Launcher log tail (last 80 lines):
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$p='%LOG_FILE%'; if(Test-Path -LiteralPath $p){ Get-Content -LiteralPath $p -Tail 80 } else { Write-Host '[TEST] launcher log not found.' }"
+)
+echo [TEST] Setup log tail (last 80 lines):
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p='%SETUP_LOG_FILE%'; if(Test-Path -LiteralPath $p){ Get-Content -LiteralPath $p -Tail 80 } else { Write-Host '[TEST] setup log not found.' }"
+echo [TEST] Runtime log tail (last 80 lines):
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p='%RUNTIME_LOG_FILE%'; if(Test-Path -LiteralPath $p){ Get-Content -LiteralPath $p -Tail 80 } else { Write-Host '[TEST] runtime log not found.' }"
+exit /b 0
+
+:wait_setup_lock_clear
+if not exist "%LOCK_FILE%" exit /b 0
+set /a LOCK_WAIT_SEC=0
+echo [TEST] Setup lock detected: %LOCK_FILE%
+:wait_lock_loop
+if not exist "%LOCK_FILE%" (
+  echo [TEST] Setup lock cleared. Continue test launch.
+  exit /b 0
+)
+ping 127.0.0.1 -n 2 >nul
+set /a LOCK_WAIT_SEC+=1
+if !LOCK_WAIT_SEC! geq !WAIT_TIMEOUT_SEC! (
+  echo [ERROR] Timeout waiting setup lock release: %LOCK_FILE%
+  call :print_timeout_diagnostics
+  exit /b 1
+)
+goto wait_lock_loop
 

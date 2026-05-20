@@ -16,6 +16,7 @@ if (-not (Test-Path -LiteralPath $legacyBat)) {
 
 Write-Output "[STEP]$tag Running buildenv stage via setup impl in buildenv-only mode..."
 $env:KIMODO_BUILDENV_ONLY = "1"
+$env:KIMODO_SETUP_BG = "1"
 try {
     & cmd.exe /d /c "cd /d `"$RootDir`" && `"$legacyBat`""
     if ($LASTEXITCODE -ne 0) {
@@ -24,6 +25,7 @@ try {
 }
 finally {
     Remove-Item Env:KIMODO_BUILDENV_ONLY -ErrorAction SilentlyContinue
+    Remove-Item Env:KIMODO_SETUP_BG -ErrorAction SilentlyContinue
 }
 
 Write-Output "[OK]$tag Buildenv stage completed."

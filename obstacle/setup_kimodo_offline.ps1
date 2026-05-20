@@ -48,8 +48,25 @@ function Test-BuildEnvReady {
         return $true
     }
     if (-not (Test-Path -LiteralPath $PythonExe)) { return $false }
-    & $PythonExe -c "import numpy; import kimodo; import huggingface_hub; import safetensors" *> $null
-    return ($LASTEXITCODE -eq 0)
+    $checkScript = @"
+import importlib
+mods = ["numpy", "kimodo", "huggingface_hub", "safetensors"]
+for m in mods:
+    importlib.import_module(m)
+"@
+    $tmp = Join-Path $env:TEMP ("kimodo_buildenv_check_" + [Guid]::NewGuid().ToString("N") + ".py")
+    Set-Content -LiteralPath $tmp -Value $checkScript -Encoding ASCII
+    try {
+        $quotedPy = '"' + $PythonExe.Replace('"','""') + '"'
+        $quotedTmp = '"' + $tmp.Replace('"','""') + '"'
+        & cmd.exe /d /c "$quotedPy $quotedTmp >nul 2>nul"
+        return ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        if (Test-Path -LiteralPath $tmp) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 $buildEnvReady = Test-BuildEnvReady -PythonExe $venvPy -SentinelPath $setupSentinel
@@ -62,64 +79,16 @@ if ($buildEnvReady) {
     }
 }
 else {
-    Write-Output "[STEP]$tag Starting parallel setup stages: buildenv + clonemodel..."
+    Write-Output "[STEP]$tag Running setup stages in single-thread mode: buildenv -> clonemodel."
 
-    $jobs = @()
-    $jobs += Start-Job -Name "buildenv.ps1" -ScriptBlock {
-        param($scriptPath, $root)
-        $ErrorActionPreference = "Stop"
-        try {
-            & $scriptPath -RootDir $root 2>&1 | ForEach-Object { "[buildenv.ps1] $_" }
-            if ($LASTEXITCODE -ne 0) {
-                throw "ExitCode=$LASTEXITCODE"
-            }
-            [pscustomobject]@{ __stage = "buildenv"; __ok = $true }
-        }
-        catch {
-            [pscustomobject]@{ __stage = "buildenv"; __ok = $false; __error = ($_ | Out-String) }
-        }
-    } -ArgumentList $buildEnvPs1, $scriptDir
-
-    $jobs += Start-Job -Name "clonemodel_async.ps1" -ScriptBlock {
-        param($scriptPath, $modelsDir)
-        $ErrorActionPreference = "Stop"
-        try {
-            & $scriptPath -ModelsDir $modelsDir 2>&1 | ForEach-Object { "[clonemodel_async.ps1] $_" }
-            if ($LASTEXITCODE -ne 0) {
-                throw "ExitCode=$LASTEXITCODE"
-            }
-            [pscustomobject]@{ __stage = "clonemodel"; __ok = $true }
-        }
-        catch {
-            [pscustomobject]@{ __stage = "clonemodel"; __ok = $false; __error = ($_ | Out-String) }
-        }
-    } -ArgumentList $cloneModelPs1, (Join-Path $scriptDir "models")
-
-    $results = @{}
-    foreach ($job in $jobs) {
-        Wait-Job -Job $job | Out-Null
-        $items = Receive-Job -Job $job
-        foreach ($item in $items) {
-            if ($item -is [string]) {
-                Write-Output $item
-                continue
-            }
-            if ($item.PSObject.Properties.Match("__stage").Count -gt 0) {
-                $results[$item.__stage] = $item
-                continue
-            }
-            Write-Output $item
-        }
+    & $buildEnvPs1 -RootDir $scriptDir 2>&1 | ForEach-Object { Write-Output "[buildenv.ps1] $_" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "[ERROR]$tag buildenv.ps1 failed with exit code $LASTEXITCODE"
     }
-    foreach ($job in $jobs) { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
 
-    if ((-not $results.ContainsKey("buildenv")) -or (-not $results["buildenv"].__ok)) {
-        $err = if ($results.ContainsKey("buildenv")) { $results["buildenv"].__error } else { "missing job result" }
-        throw "[ERROR]$tag buildenv.ps1 failed. $err"
-    }
-    if ((-not $results.ContainsKey("clonemodel")) -or (-not $results["clonemodel"].__ok)) {
-        $err = if ($results.ContainsKey("clonemodel")) { $results["clonemodel"].__error } else { "missing job result" }
-        throw "[ERROR]$tag clonemodel_async.ps1 failed. $err"
+    & $cloneModelPs1 -ModelsDir (Join-Path $scriptDir "models") 2>&1 | ForEach-Object { Write-Output "[clonemodel_async.ps1] $_" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "[ERROR]$tag clonemodel_async.ps1 failed with exit code $LASTEXITCODE"
     }
 }
 
