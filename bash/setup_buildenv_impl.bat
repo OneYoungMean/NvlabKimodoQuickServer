@@ -55,6 +55,7 @@ set "UV_DEFAULT_INDEX=https://pypi.org/simple"
 set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
 set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
 set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
+set "PYTHON_SPEC="
 
 call :ensure_uv
 if errorlevel 1 (
@@ -87,17 +88,20 @@ if /I "%UV_DEFAULT_INDEX%"=="https://pypi.org/simple" (
 
 echo [INFO] Selected uv default index: %UV_DEFAULT_INDEX%
 
-echo [STEP] Ensuring uv-managed Python 3.12...
-"%UV_BIN%" python install 3.12
+call :select_python_spec
+if errorlevel 1 exit /b 1
+
+echo [STEP] Ensuring uv-managed Python: %PYTHON_SPEC%
+"%UV_BIN%" python install "%PYTHON_SPEC%"
 if errorlevel 1 (
-  echo [ERROR] Failed to install or locate Python 3.12 via uv.
+  echo [ERROR] Failed to install or locate Python via uv: %PYTHON_SPEC%
   exit /b 1
 )
 
 set "VENV_DIR=%SOURCE_ROOT%\.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 echo [STEP] Creating/updating venv with uv...
-"%UV_BIN%" venv "%VENV_DIR%" --python 3.12 --allow-existing
+"%UV_BIN%" venv "%VENV_DIR%" --python "%PYTHON_SPEC%" --allow-existing
 if errorlevel 1 (
   echo [ERROR] uv venv failed.
   exit /b 1
@@ -248,3 +252,16 @@ if exist "%UV_BIN%" (
 echo [ERROR] Local uv missing or unusable: %UV_BIN%
 echo [ERROR] Please place uv.exe under program\exe\uv before running setup.
 exit /b 1
+
+:select_python_spec
+set "PYTHON_SPEC=3.12"
+if /I not "%OS%"=="Windows_NT" exit /b 0
+if /I "%KIMODO_PYTHON_ARCH%"=="x86" (
+  echo [ERROR] x86 Python is not supported for this pipeline.
+  echo [ERROR] Reason: torch wheels are unavailable on win32 for required versions.
+  echo [ERROR] Use default x64 Python or set KIMODO_PYTHON_ARCH=x64.
+  exit /b 1
+)
+set "PYTHON_SPEC=cpython-3.12.13-windows-x86_64-none"
+echo [INFO] Python arch selected: x64 ^(required by torch wheels on Windows^).
+exit /b 0
