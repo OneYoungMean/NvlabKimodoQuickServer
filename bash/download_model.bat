@@ -3,10 +3,11 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-set "ROOT_DIR=%SCRIPT_DIR%"
+set "ROOT_DIR=%SCRIPT_DIR%\.."
+set "LOG_DIR=%ROOT_DIR%\log"
 set "MODELS_DIR=%ROOT_DIR%\models"
 set "OUTPUT_MODE=console"
-set "LOG_PATH=%ROOT_DIR%\download_model.log"
+set "LOG_PATH=%LOG_DIR%\download_model.log"
 set "UNLOCK_STALE=0"
 set "FORCE_SYNC=0"
 set "TARGET=all"
@@ -18,7 +19,7 @@ set "MODEL_REPO_URL="
 set "LLM2VEC_NF4_REPO_URL=https://www.modelscope.cn/oneyoungmean/KIMODO-Meta3_llm2vec_NF4.git"
 set "META_LLAMA_REPO_URL=https://www.modelscope.cn/models/LLM-Research/Meta-Llama-3-8B-Instruct"
 set "LLM2VEC_PEFT_REPO_URL=https://www.modelscope.cn/models/oneyoungmean/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
-set "GIT_INSTALLER_PS1=%ROOT_DIR%\ensure_portable_git_lfs.ps1"
+set "GIT_INSTALLER_PS1=%ROOT_DIR%\bash\ensure_portable_git_lfs.ps1"
 set "GIT_ENV_TMP=%TEMP%\kimodo_git_env_%RANDOM%%RANDOM%.cmd"
 
 if defined KIMODO_LLM2VEC_NF4_REPO_URL set "LLM2VEC_NF4_REPO_URL=%KIMODO_LLM2VEC_NF4_REPO_URL%"
@@ -81,6 +82,7 @@ call :main
 exit /b %ERRORLEVEL%
 
 :main
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not exist "%MODELS_DIR%" mkdir "%MODELS_DIR%" >nul 2>nul
 
 call :ensure_git_and_lfs || exit /b 1
@@ -96,21 +98,21 @@ exit /b 1
 :model_target_selected
 call :resolve_model "%MODEL_NAME%"
 if errorlevel 1 exit /b 1
-call :ensure_repo "!MODEL_REPO_URL!" "%MODELS_DIR%\!MODEL_DIR_NAME!" "model.safetensors"
+call :ensure_repo "!MODEL_REPO_URL!" "%MODELS_DIR%\!MODEL_DIR_NAME!" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 goto model_target_done
 
 :model_target_default
 call :resolve_model "%MODEL_NAME%"
 if errorlevel 1 exit /b 1
-call :ensure_repo "!MODEL_REPO_URL!" "%MODELS_DIR%\!MODEL_DIR_NAME!" "model.safetensors"
+call :ensure_repo "!MODEL_REPO_URL!" "%MODELS_DIR%\!MODEL_DIR_NAME!" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 goto model_target_done
 
 :model_target_soma
 call :resolve_model "Kimodo-SOMA-RP-v1"
 if errorlevel 1 exit /b 1
-call :ensure_repo "!MODEL_REPO_URL!" "%MODELS_DIR%\!MODEL_DIR_NAME!" "model.safetensors"
+call :ensure_repo "!MODEL_REPO_URL!" "%MODELS_DIR%\!MODEL_DIR_NAME!" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 goto model_target_done
 
@@ -118,10 +120,10 @@ goto model_target_done
 
 if "%HIGHVRAM%"=="1" (
   echo [STEP] highvram mode enabled: full text-encoder assets
-  call :ensure_repo "%META_LLAMA_REPO_URL%" "%MODELS_DIR%\Meta-Llama-3-8B-Instruct" "model.safetensors.index.json" || exit /b 1
-  call :ensure_repo_any "%LLM2VEC_PEFT_REPO_URL%" "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised" "adapter_model.safetensors" "model.safetensors" || exit /b 1
+  call :ensure_repo "%META_LLAMA_REPO_URL%" "%MODELS_DIR%\Meta-Llama-3-8B-Instruct" "model.safetensors.index.json" "*" || exit /b 1
+  call :ensure_repo_any "%LLM2VEC_PEFT_REPO_URL%" "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised" "adapter_model.safetensors" "model.safetensors" "*" || exit /b 1
 ) else (
-  call :ensure_repo "%LLM2VEC_NF4_REPO_URL%" "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4" "model.safetensors" || exit /b 1
+  call :ensure_repo "%LLM2VEC_NF4_REPO_URL%" "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4" "model.safetensors" "*" || exit /b 1
 )
 
 echo [OK] download_model complete.
@@ -147,9 +149,10 @@ set "ANY_REPO_URL=%~1"
 set "ANY_DEST_DIR=%~2"
 set "ANY_REQ_A=%~3"
 set "ANY_REQ_B=%~4"
-call :ensure_repo "%ANY_REPO_URL%" "%ANY_DEST_DIR%" "%ANY_REQ_A%"
+set "ANY_LFS_INCLUDE=%~5"
+call :ensure_repo "%ANY_REPO_URL%" "%ANY_DEST_DIR%" "%ANY_REQ_A%" "%ANY_LFS_INCLUDE%"
 if not errorlevel 1 exit /b 0
-call :ensure_repo "%ANY_REPO_URL%" "%ANY_DEST_DIR%" "%ANY_REQ_B%"
+call :ensure_repo "%ANY_REPO_URL%" "%ANY_DEST_DIR%" "%ANY_REQ_B%" "%ANY_LFS_INCLUDE%"
 if not errorlevel 1 exit /b 0
 echo [ERROR] Missing required files after sync: %ANY_DEST_DIR%
 echo [ERROR] Need one of: %ANY_REQ_A% or %ANY_REQ_B%
@@ -219,6 +222,8 @@ exit /b 0
 set "REPO_URL=%~1"
 set "DEST_DIR=%~2"
 set "REQ_FILE=%~3"
+set "LFS_INCLUDE=%~4"
+if not defined LFS_INCLUDE set "LFS_INCLUDE=%REQ_FILE%"
 call :normalize_repo_url "%REPO_URL%"
 set "REPO_URL=%NORMALIZED_REPO_URL%"
 
@@ -256,12 +261,12 @@ if not exist "%DEST_DIR%" (
 )
 
 call :prepare_repo "%DEST_DIR%" || exit /b 1
-git -C "%DEST_DIR%" lfs pull --include="%REQ_FILE%"
+git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
 if errorlevel 1 exit /b 1
 if not exist "%DEST_DIR%\%REQ_FILE%" (
   git -C "%DEST_DIR%" checkout HEAD -- "%REQ_FILE%"
   if errorlevel 1 exit /b 1
-  git -C "%DEST_DIR%" lfs pull --include="%REQ_FILE%"
+  git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
   if errorlevel 1 exit /b 1
 )
 if not exist "%DEST_DIR%\%REQ_FILE%" (

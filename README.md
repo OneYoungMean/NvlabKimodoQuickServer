@@ -14,10 +14,10 @@ Core goals:
 
 ## What It Does
 
-- Provision and validate runtime env (`setup.bat`).
-- Download/update model assets (`download_model.bat`).
-- Start Kimodo bridge server with model/VRAM options (`run_server.bat`, `start_server.bat`).
-- Perform TCP smoke test (`test\test_run_server_tpose.bat`).
+- Provision and validate runtime env (`bash\setup.bat`).
+- Download/update model assets (`bash\download_model.bat`).
+- Start Kimodo bridge server with model/VRAM options (`run_server.bat`, `bash\start_server.bat`).
+- Perform TCP smoke test (`example\example_run_server_tpose.bat`).
 
 ## New vs Legacy (Table)
 
@@ -28,7 +28,7 @@ Core goals:
 | Repeated start behavior | Detects previous signature; same params reuse, different params quit+restart | No equivalent robust signature-based restart flow |
 | High VRAM option | `--highvram` explicit | Mainly auto-detect by local files in old flow |
 | Git bootstrap | Auto local portable `git/git-lfs` on Windows if missing | Assumes git/lfs already available |
-| Test entry | `test\test_run_server_tpose.bat` (new run_server path) | legacy tpose tests in archived scripts |
+| Test entry | `example\example_run_server_tpose.bat` (new run_server path) | legacy tpose tests in archived scripts |
 | Script style | New minimal single-thread path | Legacy compatibility path |
 
 ## Quick Start
@@ -36,31 +36,30 @@ Core goals:
 Run from `C:\nvlab\NvlabKimodoQuickServer`:
 
 ```bat
-setup.bat --output console
-start_server.bat --model Kimodo-SOMA-RP-v1 --output console
+bash\setup.bat --output console
+bash\start_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
 
 Smoke test:
 
 ```bat
-test\test_run_server_tpose.bat
+example\example_run_server_tpose.bat
 ```
 
 ## Entry Scripts
 
-- `setup.bat`
-- `download_model.bat`
+- `bash\setup.bat`
+- `bash\download_model.bat`
 - `run_server.bat`
-- `start_server.bat`
-- `test\test_run_server_tpose.bat`
+- `bash\start_server.bat`
+- `example\example_run_server_tpose.bat`
 
 Added shell wrappers:
 
-- `setup.sh`
-- `download_model.sh`
+- `bash\setup.sh`
+- `bash\download_model.sh`
 - `run_server.sh`
-- `start_server.sh`
-- `test\test_run_server_tpose.sh`
+- `bash\start_server.sh`
 
 Note: `.sh` wrappers call corresponding `.bat` via `cmd.exe`. They are intended for Git Bash/WSL-on-Windows environments. Pure Linux without `cmd.exe` is not supported by these wrappers.
 
@@ -112,12 +111,12 @@ Common statuses:
 
 ## Parameters and Model Switching
 
-### `setup.bat`
+### `bash\setup.bat`
 - `--output console|file`
 - `--log <path>`
 - `--force`
 
-### `download_model.bat`
+### `bash\download_model.bat`
 - `--model <name>`
 - `--highvram`
 - `--target <all|soma|nf4>`
@@ -126,7 +125,7 @@ Common statuses:
 - `--output console|file`
 - `--log <path>`
 
-### `run_server.bat` / `start_server.bat`
+### `run_server.bat` / `bash\start_server.bat`
 - `--model <name>`
 - `--highvram`
 - `--output console|file`
@@ -158,8 +157,7 @@ Repeated start logic:
 ## Tests and Examples
 
 Main test:
-- `test\test_run_server_tpose.bat`
-- wrapper: `test\test_run_server_tpose.sh`
+- `example\example_run_server_tpose.bat`
 
 What it validates:
 - start server
@@ -168,9 +166,19 @@ What it validates:
 - detect `status=done`
 
 Timeout rule:
-- setup/model likely needed: `1800s`
-- already prepared: `60s`
+- default: `600s`
 - override: `KIMODO_TEST_WAIT_TIMEOUT_SEC`
+
+## Logs
+
+Default logs are stored under `log\`:
+- `log\setup.log`
+- `log\download_model.log`
+- `log\run_server.log`
+- `log\example_run_server_tpose.log`
+- `log\example_run_server_tpose_client.log`
+
+When running example, console always prints full client output and also writes it to log file.
 
 ## Notes
 

@@ -4,10 +4,10 @@
 
 ## 作用
 
-- 构建并校验运行环境：`setup.bat`
-- 下载/更新模型资源：`download_model.bat`
-- 按模型与显存模式启动服务：`run_server.bat` / `start_server.bat`
-- 通过 TCP 冒烟测试验证链路：`test\test_run_server_tpose.bat`
+- 构建并校验运行环境：`bash\setup.bat`
+- 下载/更新模型资源：`bash\download_model.bat`
+- 按模型与显存模式启动服务：`run_server.bat` / `bash\start_server.bat`
+- 通过 TCP 冒烟测试验证链路：`example\example_run_server_tpose.bat`
 
 ## 与旧管线差异（表格）
 
@@ -18,38 +18,37 @@
 | 重复启动行为 | 记录参数签名：同参复用、异参先 `quit` 再重启 | 缺少等价的签名重启机制 |
 | highvram 控制 | `--highvram` 显式参数 | 旧流程偏文件存在性自动判断 |
 | git 依赖处理 | Windows 下可本地便携安装 git/git-lfs | 通常要求系统预装 |
-| 测试入口 | `test\test_run_server_tpose.bat` | 旧测试脚本已归档 |
+| 测试入口 | `example\example_run_server_tpose.bat` | 旧测试脚本已归档 |
 
 ## 快速开始
 
 在 `C:\nvlab\NvlabKimodoQuickServer` 执行：
 
 ```bat
-setup.bat --output console
-start_server.bat --model Kimodo-SOMA-RP-v1 --output console
+bash\setup.bat --output console
+bash\start_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
 
 测试：
 
 ```bat
-test\test_run_server_tpose.bat
+example\example_run_server_tpose.bat
 ```
 
 ## 入口脚本
 
-- `setup.bat`
-- `download_model.bat`
+- `bash\setup.bat`
+- `bash\download_model.bat`
 - `run_server.bat`
-- `start_server.bat`
-- `test\test_run_server_tpose.bat`
+- `bash\start_server.bat`
+- `example\example_run_server_tpose.bat`
 
 新增 `.sh` 包装入口：
 
-- `setup.sh`
-- `download_model.sh`
+- `bash\setup.sh`
+- `bash\download_model.sh`
 - `run_server.sh`
-- `start_server.sh`
-- `test\test_run_server_tpose.sh`
+- `bash\start_server.sh`
 
 说明：这些 `.sh` 是通过 `cmd.exe` 调用对应 `.bat`，适合 Git Bash/WSL-on-Windows。纯 Linux（没有 `cmd.exe`）不支持直接使用这些包装脚本。
 
@@ -101,12 +100,12 @@ test\test_run_server_tpose.bat
 
 ## 参数与模型切换
 
-### `setup.bat`
+### `bash\setup.bat`
 - `--output console|file`
 - `--log <path>`
 - `--force`
 
-### `download_model.bat`
+### `bash\download_model.bat`
 - `--model <name>`
 - `--highvram`
 - `--target <all|soma|nf4>`
@@ -115,7 +114,7 @@ test\test_run_server_tpose.bat
 - `--output console|file`
 - `--log <path>`
 
-### `run_server.bat` / `start_server.bat`
+### `run_server.bat` / `bash\start_server.bat`
 - `--model <name>`
 - `--highvram`
 - `--output console|file`
@@ -147,8 +146,7 @@ test\test_run_server_tpose.bat
 ## 测试位置与内容
 
 主测试脚本：
-- `test\test_run_server_tpose.bat`
-- 对应 `.sh`：`test\test_run_server_tpose.sh`
+- `example\example_run_server_tpose.bat`
 
 验证内容：
 - 拉起服务
@@ -157,9 +155,19 @@ test\test_run_server_tpose.bat
 - 检查是否出现 `status=done`
 
 超时规则：
-- 需要 setup/下载时：`1800s`
-- 已就绪时：`60s`
+- 默认：`600s`
 - 可用 `KIMODO_TEST_WAIT_TIMEOUT_SEC` 覆盖
+
+## 日志目录
+
+默认日志统一在 `log\`：
+- `log\setup.log`
+- `log\download_model.log`
+- `log\run_server.log`
+- `log\example_run_server_tpose.log`
+- `log\example_run_server_tpose_client.log`
+
+运行 example 时会在控制台持续打印完整 client 输出，同时写入日志文件，便于快速定位问题。
 
 ## 注意事项
 

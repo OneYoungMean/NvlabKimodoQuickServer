@@ -3,13 +3,14 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-set "ROOT_DIR=%SCRIPT_DIR%"
+set "ROOT_DIR=%SCRIPT_DIR%\.."
+set "LOG_DIR=%ROOT_DIR%\log"
 set "SOURCE_ROOT="
 set "OUTPUT_MODE=console"
-set "LOG_PATH=%ROOT_DIR%\setup.log"
+set "LOG_PATH=%LOG_DIR%\setup.log"
 set "LOCK_FILE=%ROOT_DIR%\.setup_new.lock"
 set "SENTINEL=%ROOT_DIR%\.setup_new_complete"
-set "SETUP_BUILD_IMPL=%ROOT_DIR%\setup_buildenv_impl.bat"
+set "SETUP_BUILD_IMPL=%ROOT_DIR%\bash\setup_buildenv_impl.bat"
 
 :parse_args
 if "%~1"=="" goto parsed
@@ -40,6 +41,7 @@ if not defined SOURCE_ROOT (
   echo [ERROR] Invalid project root: %ROOT_DIR%
   exit /b 1
 )
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
 if exist "%LOCK_FILE%" (
   echo [ERROR] setup already running: %LOCK_FILE%
@@ -85,7 +87,7 @@ if not "%BUILD_RC%"=="0" exit /b %BUILD_RC%
 set "KIMODO_BUILDENV_ONLY="
 set "KIMODO_SETUP_BG="
 
-set "VENV_PY=%ROOT_DIR%\.venv\Scripts\python.exe"
+set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
   echo [ERROR] Missing venv python: %VENV_PY%
   exit /b 1

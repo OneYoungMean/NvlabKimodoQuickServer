@@ -5,12 +5,13 @@ chcp 65001 >nul
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%"
+set "LOG_DIR=%ROOT_DIR%\log"
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
 set "OUTPUT_MODE=console"
-set "LOG_PATH=%ROOT_DIR%\run_server.log"
-set "SETUP_BAT=%ROOT_DIR%\setup.bat"
-set "DOWNLOAD_BAT=%ROOT_DIR%\download_model.bat"
+set "LOG_PATH=%LOG_DIR%\run_server.log"
+set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
+set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
 set "SETUP_LOCK=%ROOT_DIR%\.setup_new.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "PORT_FILE=%ROOT_DIR%\serverport"
@@ -59,6 +60,7 @@ if not defined SOURCE_ROOT (
   echo [ERROR] Invalid project root: %ROOT_DIR%
   exit /b 1
 )
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
 call :resolve_model_alias "%MODEL_NAME%"
 if errorlevel 1 exit /b 1
@@ -99,19 +101,19 @@ if exist "%PORT_FILE%" (
 
 if not exist "%SETUP_SENTINEL%" (
   echo [STEP] setup not found, running setup...
-  call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%ROOT_DIR%\setup.log"
+  call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%LOG_DIR%\setup.log"
   if errorlevel 1 exit /b 1
 )
 
 echo [STEP] Downloading model assets for model=%MODEL_NAME% highvram=%HIGHVRAM%...
 if "%HIGHVRAM%"=="1" (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%ROOT_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
 ) else (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%ROOT_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%"
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%"
 )
 if errorlevel 1 exit /b 1
 
-set "VENV_PY=%ROOT_DIR%\.venv\Scripts\python.exe"
+set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
   echo [ERROR] Missing venv python: %VENV_PY%
   exit /b 1
@@ -163,7 +165,7 @@ if not exist "%HUGGINGFACE_HUB_CACHE%" mkdir "%HUGGINGFACE_HUB_CACHE%" >nul 2>nu
 
 if /I "%OUTPUT_MODE%"=="file" (
   set "LOG_USED=%LOG_PATH%"
-  if exist "!LOG_USED!" set "LOG_USED=%ROOT_DIR%\\run_server_!RANDOM!!RANDOM!.log"
+  if exist "!LOG_USED!" set "LOG_USED=%LOG_DIR%\\run_server_!RANDOM!!RANDOM!.log"
   echo [INFO] run_server log: !LOG_USED!
   pushd "%ROOT_DIR%" >nul
   "%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_RUN_NAME%" --kimodo-root "%ROOT_DIR%" > "!LOG_USED!" 2>&1

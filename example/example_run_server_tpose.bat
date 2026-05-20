@@ -4,20 +4,21 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%\.."
+set "LOG_DIR=%ROOT_DIR%\log"
 
 set "LAUNCHER=%ROOT_DIR%\run_server.bat"
 set "MODEL=Kimodo-SOMA-RP-v1"
 set "PORT_FILE=%ROOT_DIR%\serverport"
-set "RUN_LOG=%ROOT_DIR%\test_run_server_tpose.log"
-set "CLIENT_LOG=%ROOT_DIR%\test_run_server_tpose_client.log"
-set "CLIENT_PS1=%SCRIPT_DIR%\test_run_server_tpose_client.ps1"
+set "RUN_LOG=%LOG_DIR%\example_run_server_tpose.log"
+set "CLIENT_LOG=%LOG_DIR%\example_run_server_tpose_client.log"
+set "CLIENT_PS1=%SCRIPT_DIR%\example_run_server_tpose_client.ps1"
 set "SETUP_LOCK=%ROOT_DIR%\.setup_new.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "SERVER_STARTED=0"
 set "SERVER_PID_FILE=%TEMP%\kimodo_test_server_pid_%RANDOM%%RANDOM%.txt"
 
 set "OUTPUT_MODE=%KIMODO_TEST_OUTPUT%"
-if not defined OUTPUT_MODE set "OUTPUT_MODE=console"
+if not defined OUTPUT_MODE set "OUTPUT_MODE=file"
 for /f "tokens=* delims= " %%A in ("%OUTPUT_MODE%") do set "OUTPUT_MODE=%%A"
 for /l %%I in (1,1,4) do if "!OUTPUT_MODE:~-1!"==" " set "OUTPUT_MODE=!OUTPUT_MODE:~0,-1!"
 set "WAIT_TIMEOUT_SEC="
@@ -27,9 +28,10 @@ if not exist "%LAUNCHER%" (
   exit /b 1
 )
 if not exist "%CLIENT_PS1%" (
-  echo [ERROR] test client not found: %CLIENT_PS1%
+  echo [ERROR] example client not found: %CLIENT_PS1%
   exit /b 1
 )
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
 echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODEL=%MODEL%
@@ -78,11 +80,9 @@ goto wait_port
 :got_port
 echo [TEST] TARGET=!HOST!:!PORT!
 
-if /I "%OUTPUT_MODE%"=="file" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%CLIENT_PS1%" -HostName "%HOST%" -Port %PORT% -Prompt "tpose" -Duration 5.0 -Seed 42 -DiffusionSteps 100 -ConstraintsJson "" > "%CLIENT_LOG%" 2>&1
-) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%CLIENT_PS1%" -HostName "%HOST%" -Port %PORT% -Prompt "tpose" -Duration 5.0 -Seed 42 -DiffusionSteps 100 -ConstraintsJson ""
-)
+if exist "%CLIENT_LOG%" del /q "%CLIENT_LOG%" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop'; $hostName='%HOST%'; $port=%PORT%; $prompt='tpose'; $duration=5.0; $seed=42; $steps=100; $constraints=''; $ps1='%CLIENT_PS1%'; $log='%CLIENT_LOG%'; & $ps1 -HostName $hostName -Port $port -Prompt $prompt -Duration $duration -Seed $seed -DiffusionSteps $steps -ConstraintsJson $constraints 2>&1 | Tee-Object -FilePath $log -Append"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo [TEST] Client exit code: %EXIT_CODE%
@@ -95,7 +95,7 @@ if not "%EXIT_CODE%"=="0" (
   exit /b %EXIT_CODE%
 )
 
-echo [OK] test_run_server_tpose passed.
+echo [OK] example_run_server_tpose passed.
 if /I "%OUTPUT_MODE%"=="file" if exist "%CLIENT_LOG%" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$p='%CLIENT_LOG%'; $done=Get-Content -LiteralPath $p | Where-Object { $_ -match '\"status\": \"done\"' } | Select-Object -Last 1; if($done){ Write-Host '[TEST] done payload detected.' }"
@@ -108,17 +108,7 @@ if defined KIMODO_TEST_WAIT_TIMEOUT_SEC (
   set "WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%"
   exit /b 0
 )
-set "NEED_SETUP=0"
-if not exist "%SETUP_SENTINEL%" set "NEED_SETUP=1"
-if not exist "%ROOT_DIR%\.venv\Scripts\python.exe" set "NEED_SETUP=1"
-if not exist "%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors" set "NEED_SETUP=1"
-if not exist "%ROOT_DIR%\models\%MODEL%\model.safetensors" set "NEED_SETUP=1"
-if not exist "%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4\model.safetensors" set "NEED_SETUP=1"
-if "%NEED_SETUP%"=="1" (
-  set "WAIT_TIMEOUT_SEC=1800"
-) else (
-  set "WAIT_TIMEOUT_SEC=60"
-)
+set "WAIT_TIMEOUT_SEC=600"
 exit /b 0
 
 :wait_setup_lock_clear

@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-set "PS_SCRIPT=%SCRIPT_DIR%\test_network_env.ps1"
+set "PS_SCRIPT=%SCRIPT_DIR%\example_test_network_env.ps1"
 
 if not exist "%PS_SCRIPT%" (
   echo [ERROR] Missing script: %PS_SCRIPT%
