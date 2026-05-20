@@ -9,6 +9,7 @@ set "LOCK_FILE=%ROOT_DIR%\.setup.lock"
 set "RUN_MARKER=%ROOT_DIR%\run"
 set "SETUP_LOG=%ROOT_DIR%\log\setup_buildenv_impl.log"
 set "NETWORK_PROBE_PS1=%ROOT_DIR%\bash\probe_network_env.ps1"
+set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 
 if not exist "%ROOT_DIR%" exit /b 1
 if not exist "%ROOT_DIR%\log" mkdir "%ROOT_DIR%\log" >nul 2>nul
@@ -45,7 +46,7 @@ if defined KIMODO_SETUP_BG (
 set "SETUP_EXIT=0"
 if errorlevel 1 set "SETUP_EXIT=1"
 if "%SETUP_EXIT%"=="0" if not exist "%RUN_MARKER%" mkdir "%RUN_MARKER%"
-del /q "%LOCK_FILE%" >nul 2>nul
+call :archive_file "%LOCK_FILE%"
 exit /b %SETUP_EXIT%
 
 :run_setup
@@ -69,7 +70,7 @@ if exist "%NETWORK_PROBE_PS1%" (
   if not errorlevel 1 (
     if exist "%NETWORK_ENV_CMD%" (
       call "%NETWORK_ENV_CMD%"
-      del /q "%NETWORK_ENV_CMD%" >nul 2>nul
+      call :archive_file "%NETWORK_ENV_CMD%"
     )
     if defined KIMODO_PIP_INDEX_URL set "UV_DEFAULT_INDEX=!KIMODO_PIP_INDEX_URL!"
   )
@@ -223,6 +224,17 @@ echo [OK] Build environment staged.
 echo [INFO] ROOT_DIR=%ROOT_DIR%
 echo [INFO] SOURCE_ROOT=%SOURCE_ROOT%
 echo [INFO] VENV_PY=%VENV_PY%
+exit /b 0
+
+:archive_file
+set "ARCHIVE_TARGET=%~1"
+if not exist "%ARCHIVE_TARGET%" exit /b 0
+if not exist "%RECYCLE_DIR%" mkdir "%RECYCLE_DIR%" >nul 2>nul
+set "TS=%DATE:~0,4%%DATE:~5,2%%DATE:~8,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
+set "TS=%TS: =0%"
+set "BASE=%~nx1"
+set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
+move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
 exit /b 0
 
 :ensure_uv

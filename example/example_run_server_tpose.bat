@@ -16,6 +16,7 @@ set "SETUP_LOCK=%ROOT_DIR%\.setup_new.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "SERVER_STARTED=0"
 set "SERVER_PID_FILE=%TEMP%\kimodo_test_server_pid_%RANDOM%%RANDOM%.txt"
+set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 
 set "OUTPUT_MODE=%KIMODO_TEST_OUTPUT%"
 if not defined OUTPUT_MODE set "OUTPUT_MODE=file"
@@ -43,8 +44,8 @@ echo [TEST] WAIT_TIMEOUT_SEC=%WAIT_TIMEOUT_SEC%
 call :wait_setup_lock_clear
 if errorlevel 1 exit /b 1
 
-if exist "%PORT_FILE%" del /q "%PORT_FILE%" >nul 2>nul
-if exist "%CLIENT_LOG%" del /q "%CLIENT_LOG%" >nul 2>nul
+call :archive_file "%PORT_FILE%"
+call :archive_file "%CLIENT_LOG%"
 
 call :launch_server_background
 if errorlevel 1 (
@@ -80,7 +81,7 @@ goto wait_port
 :got_port
 echo [TEST] TARGET=!HOST!:!PORT!
 
-if exist "%CLIENT_LOG%" del /q "%CLIENT_LOG%" >nul 2>nul
+call :archive_file "%CLIENT_LOG%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $hostName='%HOST%'; $port=%PORT%; $prompt='tpose'; $duration=5.0; $seed=42; $steps=100; $constraints=''; $ps1='%CLIENT_PS1%'; $log='%CLIENT_LOG%'; & $ps1 -HostName $hostName -Port $port -Prompt $prompt -Duration $duration -Seed $seed -DiffusionSteps $steps -ConstraintsJson $constraints 2>&1 | Tee-Object -FilePath $log -Append"
 set "EXIT_CODE=%ERRORLEVEL%"
@@ -151,7 +152,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 exit /b 0
 
 :launch_server_background
-if exist "%SERVER_PID_FILE%" del /q "%SERVER_PID_FILE%" >nul 2>nul
+call :archive_file "%SERVER_PID_FILE%"
 set "LAUNCH_ARGS=--model \"%MODEL%\" --output console"
 if /I "%OUTPUT_MODE%"=="file" set "LAUNCH_ARGS=--model \"%MODEL%\" --output file --log \"%RUN_LOG%\""
 set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $args='%LAUNCH_ARGS%'; $cmdArg='/d /c ""' + $launcher + '"" ' + $args; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArg -WorkingDirectory $wd -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
@@ -173,5 +174,16 @@ if defined SPID (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference='SilentlyContinue'; $pidValue='%SPID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
 )
-del /q "%SERVER_PID_FILE%" >nul 2>nul
+call :archive_file "%SERVER_PID_FILE%"
+exit /b 0
+
+:archive_file
+set "ARCHIVE_TARGET=%~1"
+if not exist "%ARCHIVE_TARGET%" exit /b 0
+if not exist "%RECYCLE_DIR%" mkdir "%RECYCLE_DIR%" >nul 2>nul
+set "TS=%DATE:~0,4%%DATE:~5,2%%DATE:~8,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
+set "TS=%TS: =0%"
+set "BASE=%~nx1"
+set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
+move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
 exit /b 0

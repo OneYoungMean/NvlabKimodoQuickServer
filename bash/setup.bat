@@ -11,6 +11,7 @@ set "LOG_PATH=%LOG_DIR%\setup.log"
 set "LOCK_FILE=%ROOT_DIR%\.setup_new.lock"
 set "SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "SETUP_BUILD_IMPL=%ROOT_DIR%\bash\setup_buildenv_impl.bat"
+set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 
 :parse_args
 if "%~1"=="" goto parsed
@@ -27,7 +28,7 @@ if /I "%~1"=="--log" (
   goto parse_args
 )
 if /I "%~1"=="--force" (
-  if exist "%SENTINEL%" del /q "%SENTINEL%" >nul 2>nul
+  call :archive_file "%SENTINEL%"
   shift
   goto parse_args
 )
@@ -61,14 +62,14 @@ if exist "%SENTINEL%" (
 if /I "%OUTPUT_MODE%"=="file" (
   call :main > "%LOG_PATH%" 2>&1
   set "RC=%ERRORLEVEL%"
-  if exist "%LOCK_FILE%" del /q "%LOCK_FILE%" >nul 2>nul
+  call :archive_file "%LOCK_FILE%"
   if "%RC%"=="0" echo [INFO] setup log: %LOG_PATH%
   exit /b %RC%
 )
 
 call :main
 set "RC=%ERRORLEVEL%"
-if exist "%LOCK_FILE%" del /q "%LOCK_FILE%" >nul 2>nul
+call :archive_file "%LOCK_FILE%"
 exit /b %RC%
 
 :main
@@ -106,4 +107,15 @@ if errorlevel 1 (
 )
 
 echo [OK] setup complete.
+exit /b 0
+
+:archive_file
+set "ARCHIVE_TARGET=%~1"
+if not exist "%ARCHIVE_TARGET%" exit /b 0
+if not exist "%RECYCLE_DIR%" mkdir "%RECYCLE_DIR%" >nul 2>nul
+set "TS=%DATE:~0,4%%DATE:~5,2%%DATE:~8,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
+set "TS=%TS: =0%"
+set "BASE=%~nx1"
+set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
+move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
 exit /b 0
