@@ -27,6 +27,7 @@ $maxGenerateWaitMinutes = 30
 try {
     $client = New-Object Net.Sockets.TcpClient($HostName, $Port)
     $stream = $client.GetStream()
+    $stream.ReadTimeout = 1000
     $writer = New-Object IO.StreamWriter($stream)
     $writer.AutoFlush = $true
     $reader = New-Object IO.StreamReader($stream)
@@ -34,7 +35,12 @@ try {
     $deadline = (Get-Date).AddMinutes(10)
     while ($true) {
         Send-Line -Writer $writer -Obj @{ cmd = "ping" }
-        $line = $reader.ReadLine()
+        $line = $null
+        try { $line = $reader.ReadLine() } catch [System.IO.IOException] { }
+        if ($null -eq $line) {
+            if ((Get-Date) -gt $deadline) { throw "Timeout waiting for model ready." }
+            continue
+        }
         if ($null -eq $line) { throw "Bridge closed connection during ping." }
         Write-Output $line
         $obj = $line | ConvertFrom-Json
@@ -58,7 +64,16 @@ try {
 
     $done = $false
     $doneDeadline = (Get-Date).AddMinutes($maxGenerateWaitMinutes)
-    while (($line = $reader.ReadLine()) -ne $null) {
+    while ($true) {
+        $line = $null
+        try { $line = $reader.ReadLine() } catch [System.IO.IOException] { }
+        if ($null -eq $line) {
+            if ((Get-Date) -gt $doneDeadline) {
+                try { Send-Line -Writer $writer -Obj @{ cmd = "quit" } } catch {}
+                throw "Timeout waiting for generate done."
+            }
+            continue
+        }
         Write-Output $line
         $obj = $line | ConvertFrom-Json
         if ($obj.status -eq "error") {
@@ -68,10 +83,6 @@ try {
         if ($obj.status -eq "done") {
             $done = $true
             break
-        }
-        if ((Get-Date) -gt $doneDeadline) {
-            try { Send-Line -Writer $writer -Obj @{ cmd = "quit" } } catch {}
-            throw "Timeout waiting for generate done."
         }
     }
     if (-not $done) { throw "Bridge closed connection before done." }
@@ -87,6 +98,10 @@ try {
     while ($true) {
         try {
             $line = $reader.ReadLine()
+        }
+        catch [System.IO.IOException] {
+            if ($stream -and $stream.CanRead) { continue }
+            break
         }
         catch {
             # Treat post-done disconnect as normal shutdown.

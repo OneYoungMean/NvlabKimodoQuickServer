@@ -47,6 +47,9 @@ set "PIP_TRUSTED_HOST_GLOBAL=pypi.org"
 set "PIP_INDEX_URL="
 set "PIP_TRUSTED_HOST="
 set "PIP_COMMON="
+set "PIP_INDEX_ARGS="
+set "UV_BIN=%ROOT_DIR%\tools\uv\uv.exe"
+set "UV_MODE=0"
 set "PY_ZIP_MIRROR_BASE=https://mirrors.tuna.tsinghua.edu.cn/python/"
 set "PY_ZIP_OFFICIAL_BASE=https://www.python.org/ftp/python/"
 set "NETWORK_PROBE_PS1=%ROOT_DIR%\probe_network_env.ps1"
@@ -100,6 +103,7 @@ if not defined PIP_INDEX_URL (
 )
 echo [INFO] Selected pip index: %PIP_INDEX_URL%
 set "PIP_COMMON=--disable-pip-version-check --progress-bar off --retries 1 --timeout 60 --index-url %PIP_INDEX_URL% --trusted-host %PIP_TRUSTED_HOST%"
+set "PIP_INDEX_ARGS=--index-url %PIP_INDEX_URL% --trusted-host %PIP_TRUSTED_HOST%"
 set "PY_MIRROR_OK=0"
 set "PY_OFFICIAL_OK=0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -164,6 +168,12 @@ if not exist "%PY312_EXE%" (
   exit /b 1
 )
 
+call :ensure_uv
+if errorlevel 1 (
+  echo [WARN] uv unavailable, fallback to pip workflow.
+  set "UV_MODE=0"
+)
+
 set "PTH_FILE=%PY312_DIR%\python312._pth"
 if exist "%PTH_FILE%" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -187,27 +197,37 @@ if errorlevel 1 (
 )
 
 echo [STEP] Ensuring virtualenv...
-if exist "%PIP_BOOTSTRAP_DIR%\virtualenv-21.3.3-py3-none-any.whl" (
-  "%PY312_EXE%" -m pip install --disable-pip-version-check --progress-bar off --retries 1 --timeout 60 --no-index --find-links "%PIP_BOOTSTRAP_DIR%" virtualenv
+if "%UV_MODE%"=="1" (
+  echo [INFO] uv mode enabled, skip virtualenv bootstrap.
 ) else (
-  "%PY312_EXE%" -m pip install %PIP_COMMON% virtualenv
-)
-if errorlevel 1 (
-  echo [ERROR] Failed to install virtualenv.
-  exit /b 1
+  if exist "%PIP_BOOTSTRAP_DIR%\virtualenv-21.3.3-py3-none-any.whl" (
+    "%PY312_EXE%" -m pip install --disable-pip-version-check --progress-bar off --retries 1 --timeout 60 --no-index --find-links "%PIP_BOOTSTRAP_DIR%" virtualenv
+  ) else (
+    "%PY312_EXE%" -m pip install %PIP_COMMON% virtualenv
+  )
+  if errorlevel 1 (
+    echo [ERROR] Failed to install virtualenv.
+    exit /b 1
+  )
 )
 
 set "VENV_DIR=%ROOT_DIR%\.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
-if not exist "%VENV_PY%" "%PY312_EXE%" -m venv "%VENV_DIR%" >nul 2>nul
-if not exist "%VENV_PY%" "%PY312_EXE%" -m virtualenv "%VENV_DIR%"
+if not exist "%VENV_PY%" (
+  if "%UV_MODE%"=="1" (
+    "%UV_BIN%" venv "%VENV_DIR%" --python "%PY312_EXE%"
+  ) else (
+    "%PY312_EXE%" -m venv "%VENV_DIR%" >nul 2>nul
+    if not exist "%VENV_PY%" "%PY312_EXE%" -m virtualenv "%VENV_DIR%"
+  )
+)
 if not exist "%VENV_PY%" (
   echo [ERROR] venv python missing: %VENV_PY%
   exit /b 1
 )
 
 echo [STEP] Ensuring pip tools in venv...
-"%VENV_PY%" -m pip install %PIP_COMMON% --upgrade pip "setuptools<82" wheel
+call :install_pkgs "%VENV_PY%" --upgrade pip setuptools<82 wheel
 if errorlevel 1 (
   echo [ERROR] Failed to bootstrap pip/setuptools/wheel in venv.
   exit /b 1
@@ -216,7 +236,7 @@ if errorlevel 1 (
 echo [STEP] Ensuring torchruntime helper...
 "%VENV_PY%" -c "import torchruntime" >nul 2>nul
 if errorlevel 1 (
-  "%VENV_PY%" -m pip install %PIP_COMMON% torchruntime
+  call :install_pkgs "%VENV_PY%" torchruntime
   if errorlevel 1 (
     echo [ERROR] Failed to install torchruntime.
     exit /b 1
@@ -247,7 +267,7 @@ if errorlevel 1 (
 echo [STEP] Ensuring runtime deps from pip...
 "%VENV_PY%" -c "import huggingface_hub, safetensors" >nul 2>nul
 if errorlevel 1 (
-  "%VENV_PY%" -m pip install %PIP_COMMON% huggingface_hub safetensors
+  call :install_pkgs "%VENV_PY%" huggingface_hub safetensors
   if errorlevel 1 (
     echo [ERROR] Failed to install runtime dependencies from pip.
     exit /b 1
@@ -260,11 +280,9 @@ echo [STEP] Ensuring kimodo editable package...
 "%VENV_PY%" -c "from kimodo import load_model" >nul 2>nul
 if errorlevel 1 (
   set "SKIP_MOTION_CORRECTION_IN_SETUP=1"
-  pushd "%SOURCE_ROOT%" >nul
-  "%VENV_PY%" -m pip install %PIP_COMMON% -e . --no-build-isolation
+  call :install_editable "%VENV_PY%" "%SOURCE_ROOT%"
   set "PKG_INSTALL_CODE=0"
   if errorlevel 1 set "PKG_INSTALL_CODE=1"
-  popd >nul
   if "%PKG_INSTALL_CODE%"=="1" (
     echo [ERROR] Failed to install kimodo editable package from: %SOURCE_ROOT%
     exit /b 1
@@ -276,7 +294,7 @@ if errorlevel 1 (
 echo [STEP] Ensuring bitsandbytes for 4-bit quantization...
 "%VENV_PY%" -c "import bitsandbytes as bnb; print(getattr(bnb, '__version__', 'unknown'))" >nul 2>nul
 if errorlevel 1 (
-  "%VENV_PY%" -m pip install %PIP_COMMON% "bitsandbytes>=0.46.1"
+  call :install_pkgs "%VENV_PY%" bitsandbytes>=0.46.1
   if errorlevel 1 (
     echo [ERROR] Failed to install bitsandbytes required for 4-bit quantization.
     exit /b 1
@@ -292,15 +310,13 @@ set "MC_SRC=%SOURCE_ROOT%\MotionCorrection\python\motion_correction"
 "%VENV_PY%" -c "import motion_correction" >nul 2>nul
 if errorlevel 1 (
   if exist "%MC_WHL_WIN%" (
-    "%VENV_PY%" -m pip install %PIP_COMMON% "%MC_WHL_WIN%"
+    call :install_pkgs "%VENV_PY%" "%MC_WHL_WIN%"
   ) else if exist "%MC_WHL_LINUX%" (
-    "%VENV_PY%" -m pip install %PIP_COMMON% "%MC_WHL_LINUX%"
+    call :install_pkgs "%VENV_PY%" "%MC_WHL_LINUX%"
   ) else if exist "%MC_SRC%\setup.py" (
-    pushd "%MC_SRC%" >nul
-    "%VENV_PY%" -m pip install -e . --no-build-isolation
+    call :install_editable "%VENV_PY%" "%MC_SRC%"
     set "MC_INSTALL_CODE=0"
     if errorlevel 1 set "MC_INSTALL_CODE=1"
-    popd >nul
     if "%MC_INSTALL_CODE%"=="1" (
       echo [ERROR] Failed to install motion_correction from source: %MC_SRC%
       exit /b 1
@@ -401,4 +417,48 @@ echo [OK][setup_kimodo_offline_impl.bat] Build environment staged.
 echo [INFO][setup_kimodo_offline_impl.bat] ROOT_DIR=%ROOT_DIR%
 echo [INFO][setup_kimodo_offline_impl.bat] VENV_PY=%VENV_PY%
 exit /b 0
+
+:ensure_uv
+if exist "%UV_BIN%" (
+  "%UV_BIN%" --version >nul 2>nul
+  if not errorlevel 1 (
+    set "UV_MODE=1"
+    echo [INFO] Using local uv: %UV_BIN%
+    exit /b 0
+  )
+)
+uv --version >nul 2>nul
+if not errorlevel 1 (
+  set "UV_BIN=uv"
+  set "UV_MODE=1"
+  echo [INFO] Using system uv.
+  exit /b 0
+)
+exit /b 1
+
+:install_pkgs
+set "INST_PY=%~1"
+shift
+if "%UV_MODE%"=="1" (
+  "%UV_BIN%" pip install --python "%INST_PY%" %PIP_INDEX_ARGS% --retries 1 --timeout 60 %*
+) else (
+  "%INST_PY%" -m pip install %PIP_COMMON% %*
+)
+exit /b %ERRORLEVEL%
+
+:install_editable
+set "EDIT_PY=%~1"
+set "EDIT_SRC=%~2"
+if "%UV_MODE%"=="1" (
+  pushd "%EDIT_SRC%" >nul
+  "%UV_BIN%" pip install --python "%EDIT_PY%" %PIP_INDEX_ARGS% --disable-pip-version-check --retries 1 --timeout 60 -e . --no-build-isolation
+  set "EDIT_RC=%ERRORLEVEL%"
+  popd >nul
+  exit /b %EDIT_RC%
+)
+pushd "%EDIT_SRC%" >nul
+"%EDIT_PY%" -m pip install %PIP_COMMON% -e . --no-build-isolation
+set "EDIT_RC=%ERRORLEVEL%"
+popd >nul
+exit /b %EDIT_RC%
 
