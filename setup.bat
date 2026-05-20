@@ -10,7 +10,6 @@ set "LOG_PATH=%ROOT_DIR%\setup.log"
 set "LOCK_FILE=%ROOT_DIR%\.setup_new.lock"
 set "SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "SETUP_BUILD_IMPL=%ROOT_DIR%\setup_kimodo_offline_impl.bat"
-set "DOWNLOAD_BAT=%ROOT_DIR%\download_model.bat"
 
 if not exist "%SETUP_BUILD_IMPL%" set "SETUP_BUILD_IMPL=%ROOT_DIR%\obstacle\setup_kimodo_offline_impl.bat"
 
@@ -88,14 +87,6 @@ if not "%BUILD_RC%"=="0" exit /b %BUILD_RC%
 set "KIMODO_BUILDENV_ONLY="
 set "KIMODO_SETUP_BG="
 
-echo [STEP] Download models...
-if not exist "%DOWNLOAD_BAT%" (
-  echo [ERROR] Missing download script: %DOWNLOAD_BAT%
-  exit /b 1
-)
-call "%DOWNLOAD_BAT%" --unlock-stale --output console
-if errorlevel 1 exit /b 1
-
 set "VENV_PY=%ROOT_DIR%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
   echo [ERROR] Missing venv python: %VENV_PY%
@@ -105,14 +96,6 @@ set "PYTHONPATH=%SOURCE_ROOT%"
 "%VENV_PY%" -c "import numpy, kimodo, huggingface_hub, safetensors"
 if errorlevel 1 (
   echo [ERROR] Runtime import check failed.
-  exit /b 1
-)
-if not exist "%ROOT_DIR%\models\Kimodo-SOMA-RP-v1\model.safetensors" (
-  echo [ERROR] Missing SOMA model file.
-  exit /b 1
-)
-if not exist "%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4\model.safetensors" (
-  echo [ERROR] Missing NF4 model file.
   exit /b 1
 )
 

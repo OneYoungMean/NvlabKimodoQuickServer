@@ -23,10 +23,15 @@ class LLM2VecEncoder(nn.Module):
         super().__init__()
         self.torch_dtype = getattr(torch, dtype)
         self.llm_dim = llm_dim
+        self.base_model_name_or_path = base_model_name_or_path
+        self.peft_model_name_or_path = peft_model_name_or_path
 
         self.custom_dir = self._resolve_local_text_encoder_dir()
+        self.custom_peft_dir = self._resolve_local_llm2vec_peft_dir()
 
         print(f"[LLM2VecEncoder] Initializing model from {self.custom_dir}...")
+        if self.custom_peft_dir:
+            print(f"[LLM2VecEncoder] Using PEFT adapter from {self.custom_peft_dir}...")
         print(f"[LLM2VecEncoder] Initialized (Waiting for first use to load weights)...")
         self.model = None
 
@@ -81,6 +86,43 @@ class LLM2VecEncoder(nn.Module):
             f"Checked: {ordered_candidates}"
         )
 
+    def _resolve_local_llm2vec_peft_dir(self) -> str | None:
+        """Resolve optional external LLM2Vec PEFT adapter directory."""
+        candidates: list[str] = []
+
+        env_peft = os.environ.get("KIMODO_LLM2VEC_PEFT_DIR", "").strip()
+        if env_peft:
+            candidates.append(os.path.abspath(env_peft))
+
+        text_encoders_dir = os.environ.get("TEXT_ENCODERS_DIR", "").strip()
+        if text_encoders_dir:
+            peft_name = self.peft_model_name_or_path.replace("/", os.sep)
+            candidates.append(os.path.abspath(os.path.join(text_encoders_dir, peft_name)))
+
+        kimodo_root = os.environ.get("KIMODO_ROOT_PATH", "").strip()
+        if kimodo_root:
+            candidates.append(
+                os.path.abspath(
+                    os.path.join(kimodo_root, "models", "LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised")
+                )
+            )
+
+        seen = set()
+        ordered_candidates = []
+        for c in candidates:
+            if c and c not in seen:
+                seen.add(c)
+                ordered_candidates.append(c)
+
+        for c in ordered_candidates:
+            if os.path.isdir(c):
+                if os.path.exists(os.path.join(c, "adapter_model.safetensors")) or os.path.exists(
+                    os.path.join(c, "model.safetensors")
+                ):
+                    return c
+
+        return None
+
     def unload(self):
         """Offload the model weights to System RAM (CPU) if currently on GPU."""
         if self.model is not None:
@@ -110,7 +152,7 @@ class LLM2VecEncoder(nn.Module):
             print(f"[LLM2VecEncoder] Model was None. Reloading from disk (15s delay)...")
             self.model = LLM2Vec.from_pretrained(
                 base_model_name_or_path=self.custom_dir,
-                peft_model_name_or_path=None,
+                peft_model_name_or_path=self.custom_peft_dir,
                 torch_dtype=self.torch_dtype,
                 device_map="cpu"
             )

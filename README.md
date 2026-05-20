@@ -1,93 +1,108 @@
 # NvlabKimodoQuickServer
 
-Offline Windows launcher package for running the Kimodo Unity bridge and validating generation with a `tpose` smoke test.
+Windows offline launcher for Kimodo bridge server (new clean pipeline):
 
-## What this directory does
+- `setup.bat` (env only)
+- `download_model.bat` (model assets)
+- `run_server.bat` / `start_server.bat` (start bridge)
+- `test\test_run_server_tpose.bat`
 
-- Builds/repairs an offline Python runtime (`python312` + `.venv`) for Kimodo.
-- Installs core runtime packages (PyTorch via `torchruntime`, `kimodo`, `motion_correction`, `bitsandbytes`).
-- Ensures required model folders under `models\`.
-- Launches `kimodo.bridge.bridge_server` in offline mode for Unity integration.
-- Provides a one-shot bridge integration test (`test_unity_bridge_generate_tpose.bat`).
-- Exports neutral skeleton pose JSON files from Kimodo assets.
+Legacy scripts are archived under `obstacle\`.
 
-## Main entry scripts
+## Quick start
 
-- `setup_kimodo_offline.bat`
-  - End-to-end offline setup.
-  - Creates `.kimodo_offline_setup_complete` sentinel on success.
-  - Writes log to `setup_kimodo_offline.log` (unless run in background mode).
-  - Runs `models\clonemodel.bat` in background when required models are missing.
-
-- `start_kimodo_bridge_offline.bat`
-  - Validates setup state and required models.
-  - Sets offline HF/Transformers env vars and cache paths.
-  - Starts bridge server:
-    - module: `kimodo.bridge.bridge_server`
-    - args: `--model`, `--kimodo-root`
-  - Creates `serverport` and runtime log (`bridge_runtime.log`) in root.
-
-- `test_unity_bridge_generate_tpose.bat`
-  - Writes request JSONL with commands: `ping`, `generate`, `quit`.
-  - Pipes request to `start_kimodo_bridge_offline.bat`.
-  - Writes test log to `bridge_test_generate_tpose.log`.
-  - Checks for `"ready"`, `"done"`, `"bye"` statuses.
-  - Prints frame/joint summary from returned motion payload.
-
-- `export_kimodo_neutral_poses.bat`
-  - Calls `tools\export_kimodo_neutral_poses.py`.
-  - Exports neutral pose JSONs from `kimodo\kimodo\assets\skeletons` to `neutral_pose_exports\`.
-
-## Directory structure (key parts)
-
-- `kimodo\`:
-  - Kimodo source tree (bridge server and python package).
-- `models\`:
-  - Model repositories/checkpoints used by offline bridge.
-- `wheels\`:
-  - Prebuilt `motion_correction` wheels.
-- `tools\`:
-  - Utility scripts (neutral pose export).
-- `get-pip\`:
-  - Local `get-pip.py` source used for pip bootstrap.
-
-## Required models for bridge startup
-
-At minimum:
-
-- `models\Kimodo-SOMA-RP-v1\model.safetensors`
-- One text encoder source:
-  - `models\Meta-Llama-3-8B-Instruct\...` (full model), or
-  - `models\KIMODO-Meta3_llm2vec_NF4\model.safetensors`
-
-## Typical usage
-
-From `C:\nvlab\NvlabKimodoQuickServer`:
+Run in `C:\nvlab\NvlabKimodoQuickServer`:
 
 ```bat
-setup_kimodo_offline.bat
-test_unity_bridge_generate_tpose.bat
+setup.bat --output console
+start_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
 
-Or start bridge directly:
+Or smoke test:
 
 ```bat
-start_kimodo_bridge_offline.bat --model Kimodo-SOMA-RP-v1 --kimodo-root C:\nvlab\NvlabKimodoQuickServer
+test\test_run_server_tpose.bat
 ```
 
-## Important runtime artifacts
+## Script behavior
 
-- `.setup.lock`: setup in progress marker.
-- `.kimodo_offline_setup_complete`: setup success sentinel.
-- `run\`: setup completion marker folder.
-- `setup_kimodo_offline.log`: setup output log.
-- `clonemodel.log`: model clone log.
-- `bridge_test_generate_tpose.log`: smoke-test output log.
-- `bridge_runtime.log`: bridge server runtime log.
-- `serverport`: active bridge host:port.
+### `setup.bat`
+
+Single-thread environment setup only:
+
+1. Build/repair Python runtime and `.venv`
+2. Install runtime dependencies
+3. Runtime import check
+4. Write setup sentinel `.setup_new_complete`
+
+Options:
+
+- `--output console|file`
+- `--log <path>`
+- `--force`
+
+### `download_model.bat`
+
+Single-thread model downloader/updater.
+
+Main options:
+
+- `--model <name>`: target Kimodo model directory/repo
+- `--highvram`: use full text encoder stack (`Meta-Llama-3-8B-Instruct` + `LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised`)
+- default (without `--highvram`): use `KIMODO-Meta3_llm2vec_NF4`
+- `--unlock-stale`: rotate stale git lock
+- `--force`: force sync even if required file exists
+- `--output console|file`
+- `--log <path>`
+- `KIMODO_LLM2VEC_PEFT_REPO_URL`: optional override when default highvram PEFT repo is inaccessible from current network
+
+Model name examples:
+
+- `Kimodo-SOMA-RP-v1`
+- `Kimodo-G1-RP-v1`
+- `Kimodo-SMPLX-RP-v1`
+- aliases like `soma`, `g1`, `smplx`, `soma-seed`
+
+### `run_server.bat` / `start_server.bat`
+
+`start_server.bat` is a thin wrapper over `run_server.bat`.
+
+Pipeline:
+
+1. Ensure setup sentinel exists, otherwise run `setup.bat`
+2. Call `download_model.bat` with selected `--model` and `--highvram`
+3. Configure offline env vars and start `kimodo.bridge.bridge_server`
+
+Parameter options:
+
+- `--model <name>`
+- `--highvram`
+- `--output console|file`
+- `--log <path>`
+- `--force-setup`
+
+Repeated start behavior:
+
+- If `serverport` exists and requested params are the same as last run, script exits directly.
+- If params differ, script sends `quit` to old server, waits for shutdown, then rebuilds with new params.
+- In `--highvram` mode, launcher wires `KIMODO_LLM2VEC_DIR`, `KIMODO_LLM2VEC_PEFT_DIR`, and `TEXT_ENCODERS_DIR` to match full Llama + adapter loading.
+
+### `test\test_run_server_tpose.bat`
+
+TCP smoke test:
+
+1. Start `start_server.bat`
+2. Wait for `serverport`
+3. Send `ping -> generate(tpose) -> quit`
+4. Success when response contains `status=done`
+
+Timeout rule:
+
+- if setup/model likely needed: `1800s`
+- otherwise: `60s`
+- override by env `KIMODO_TEST_WAIT_TIMEOUT_SEC`
 
 ## Notes
 
-- The setup script is stateful and skips already-satisfied steps.
-- `clonemodel.bat` uses `git` + `git lfs`; ensure both are available on PATH.
-- Test success criteria is practical bridge behavior (`ready` + `done` + `bye`) rather than only process exit code.
+- `download_model.bat` first checks `git` and `git lfs`; if missing on Windows, it bootstraps a local portable copy under `tools\` and only injects PATH for the current script context (no global/user PATH change).
+- New pipeline should be used for run/setup/test; `obstacle\` is archival.
