@@ -154,7 +154,14 @@ if not exist "%PY312_EXE%" (
     exit /b 1
   )
 
-  if exist "%PY312_DIR%" rmdir /s /q "%PY312_DIR%"
+  if exist "%PY312_DIR%" (
+    set "PY312_BAK=%PY312_DIR%.broken.%RANDOM%%RANDOM%"
+    move "%PY312_DIR%" "%PY312_BAK%" >nul
+    if errorlevel 1 (
+      echo [ERROR] Failed to archive existing python dir: %PY312_DIR%
+      exit /b 1
+    )
+  )
   mkdir "%PY312_DIR%" || exit /b 1
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%PY_ZIP_PATH%' -DestinationPath '%PY312_DIR%' -Force"
   if errorlevel 1 (

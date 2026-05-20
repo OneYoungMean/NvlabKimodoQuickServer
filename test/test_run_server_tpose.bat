@@ -164,9 +164,12 @@ exit /b 0
 if exist "%SERVER_PID_FILE%" del /q "%SERVER_PID_FILE%" >nul 2>nul
 set "LAUNCH_ARGS=--model \"%MODEL%\" --output console"
 if /I "%OUTPUT_MODE%"=="file" set "LAUNCH_ARGS=--model \"%MODEL%\" --output file --log \"%RUN_LOG%\""
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $args='%LAUNCH_ARGS%'; $cmdArg='/d /c \"\"' + $launcher + '\" ' + $args + '\"'; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArg -WorkingDirectory $wd -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
-if errorlevel 1 exit /b 1
+set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $args='%LAUNCH_ARGS%'; $cmdArg='/d /c ""' + $launcher + '"" ' + $args; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArg -WorkingDirectory $wd -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
+if errorlevel 1 (
+  echo [ERROR] launch_server_background failed.
+  exit /b 1
+)
 set "SERVER_STARTED=1"
 exit /b 0
 

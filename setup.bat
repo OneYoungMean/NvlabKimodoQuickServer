@@ -10,8 +10,6 @@ set "LOG_PATH=%ROOT_DIR%\setup.log"
 set "LOCK_FILE=%ROOT_DIR%\.setup_new.lock"
 set "SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "SETUP_BUILD_IMPL=%ROOT_DIR%\setup_buildenv_impl.bat"
-if not exist "%SETUP_BUILD_IMPL%" set "SETUP_BUILD_IMPL=%ROOT_DIR%\setup_kimodo_offline_impl.bat"
-if not exist "%SETUP_BUILD_IMPL%" set "SETUP_BUILD_IMPL=%ROOT_DIR%\obstacle\setup_kimodo_offline_impl.bat"
 
 :parse_args
 if "%~1"=="" goto parsed

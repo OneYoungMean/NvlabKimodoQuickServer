@@ -235,16 +235,22 @@ if exist "%DEST_DIR%" (
 
 if not exist "%DEST_DIR%" (
   echo [STEP] Cloning %REPO_URL%
+  set "GIT_LFS_SKIP_SMUDGE=1"
   git clone "%REPO_URL%" "%DEST_DIR%"
+  set "GIT_LFS_SKIP_SMUDGE="
   if errorlevel 1 exit /b 1
 ) else (
   call :prepare_repo "%DEST_DIR%" || exit /b 1
   echo [STEP] Updating existing repo: %DEST_DIR%
+  set "GIT_LFS_SKIP_SMUDGE=1"
   git -C "%DEST_DIR%" pull
+  set "GIT_LFS_SKIP_SMUDGE="
   if errorlevel 1 (
     call :backup_dir "%DEST_DIR%" || exit /b 1
     echo [STEP] Re-cloning %REPO_URL%
+    set "GIT_LFS_SKIP_SMUDGE=1"
     git clone "%REPO_URL%" "%DEST_DIR%"
+    set "GIT_LFS_SKIP_SMUDGE="
     if errorlevel 1 exit /b 1
   )
 )
