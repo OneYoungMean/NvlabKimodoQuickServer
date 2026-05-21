@@ -10,6 +10,9 @@ set "TEST_BAT_REL=example\example_run_server_tpose.bat"
 set "SHARED_MODELS_SRC=C:\nvlab\models"
 set "SHARED_MODELS_ALT=C:\nvlab\models~"
 set "TEST_MODELS_ROOT="
+set "COPY_ONLY=%KIMODO_COPY_ONLY%"
+if not defined COPY_ONLY set "COPY_ONLY=0"
+set "COPY_DEST_FILE=%KIMODO_COPY_DEST_FILE%"
 
 if not exist "%SOURCE_DIR%" (
   echo [ERROR] Source directory not found: %SOURCE_DIR%
@@ -56,6 +59,19 @@ if not exist "%SHARED_MODELS_SRC%" (
 )
 set "TEST_MODELS_ROOT=%SHARED_MODELS_SRC%"
 echo [INFO] Test models root: %TEST_MODELS_ROOT%
+
+if /I "%COPY_ONLY%"=="1" (
+  echo [RESULT] DEST_DIR=%DEST_DIR%
+  echo [RESULT] TEST_MODELS_ROOT=%TEST_MODELS_ROOT%
+  if defined COPY_DEST_FILE (
+    > "%COPY_DEST_FILE%" (
+      echo DEST_DIR=%DEST_DIR%
+      echo TEST_MODELS_ROOT=%TEST_MODELS_ROOT%
+    )
+    echo [INFO] Dest info file: %COPY_DEST_FILE%
+  )
+  exit /b 0
+)
 
 if not exist "%DEST_TEST_BAT%" (
   echo [ERROR] Test entry not found after copy: %DEST_TEST_BAT%

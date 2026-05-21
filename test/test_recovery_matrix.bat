@@ -350,7 +350,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; " ^
   "$root='%CASE_ROOT%'; $target='%INT_TARGET%'; $exe=Join-Path $root 'example\\example_run_server_tpose.bat'; $pidFile='%INT_PID_FILE%'; " ^
   "$env:KIMODO_TEST_OUTPUT='file'; $env:KIMODO_TEST_WAIT_TIMEOUT_SEC='600'; $env:KIMODO_TEST_SCENARIO_NAME='%SCENARIO_NAME%_interrupt'; $env:KIMODO_TEST_SERVER_PID_FILE=$pidFile; " ^
-  "$p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/c',$exe) -WorkingDirectory $root -WindowStyle Hidden -PassThru; " ^
+  "$p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/c',$exe) -WorkingDirectory $root -WindowStyle Normal -PassThru; " ^
   "$deadline=(Get-Date).AddMinutes(8); " ^
   "while((Get-Date) -lt $deadline){ " ^
   "  $hit=$false; " ^

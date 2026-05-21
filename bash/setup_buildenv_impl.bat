@@ -56,6 +56,10 @@ set "UV_DEFAULT_INDEX=https://pypi.org/simple"
 set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
 set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
 set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
+set "NETWORK_PROBE_TIMEOUT_SEC=%KIMODO_NETWORK_PROBE_TIMEOUT_SEC%"
+if not defined NETWORK_PROBE_TIMEOUT_SEC set "NETWORK_PROBE_TIMEOUT_SEC=1"
+set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=%KIMODO_NETWORK_FALLBACK_HEAD_TIMEOUT_SEC%"
+if not defined NETWORK_FALLBACK_HEAD_TIMEOUT_SEC set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=3"
 set "PYTHON_SPEC="
 set "INJECT_ONCE=0"
 
@@ -70,9 +74,9 @@ if errorlevel 1 (
 )
 
 echo [STEP] Checking network reachability for package index...
-echo [INFO] Network probe started...
+echo [INFO] Network probe started... timeout=%NETWORK_PROBE_TIMEOUT_SEC%s
 if exist "%NETWORK_PROBE_PS1%" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%NETWORK_PROBE_PS1%" -TimeoutSec 8 -EmitCmdFile "%NETWORK_ENV_CMD%" -Quiet
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%NETWORK_PROBE_PS1%" -TimeoutSec %NETWORK_PROBE_TIMEOUT_SEC% -EmitCmdFile "%NETWORK_ENV_CMD%" -Quiet
   if not errorlevel 1 (
     if exist "%NETWORK_ENV_CMD%" (
       call "%NETWORK_ENV_CMD%"
@@ -100,7 +104,7 @@ if not defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=%UV_INDEX_CANDIDATE_GLOBAL
 
 if /I "%UV_DEFAULT_INDEX%"=="https://pypi.org/simple" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $u='%UV_INDEX_CANDIDATE_CN%'; $t=20;" ^
+    "$ErrorActionPreference='Stop'; $u='%UV_INDEX_CANDIDATE_CN%'; $t=[int]'%NETWORK_FALLBACK_HEAD_TIMEOUT_SEC%';" ^
     "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec $t -Uri $u | Out-Null; exit 0 } catch { exit 1 }"
   if not errorlevel 1 set "UV_DEFAULT_INDEX=%UV_INDEX_CANDIDATE_CN%"
 )
