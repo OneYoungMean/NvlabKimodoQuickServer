@@ -17,6 +17,9 @@ set "SHARED_MODELS_ROOT=%KIMODO_SHARED_MODELS_ROOT%"
 if not defined SHARED_MODELS_ROOT set "SHARED_MODELS_ROOT=C:\nvlab\models"
 set "TEST_MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
 if not defined TEST_MODELS_ROOT set "TEST_MODELS_ROOT="
+if /I "%USE_SHARED_MODELS%"=="1" (
+  if defined TEST_MODELS_ROOT set "SHARED_MODELS_ROOT=%TEST_MODELS_ROOT%"
+)
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "RUN_LOG=%LOG_DIR%\example_run_server_tpose.log"
 set "CLIENT_LOG=%LOG_DIR%\example_run_server_tpose_client.log"

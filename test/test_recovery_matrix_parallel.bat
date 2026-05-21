@@ -89,22 +89,23 @@ exit /b 0
 set "CASE_NAME=%~1"
 set "RESULT_FILE=%RESULT_DIR%\%CASE_NAME%.result"
 set "PID_FILE=%RESULT_DIR%\%CASE_NAME%.pid"
+call :wait_for_pid_or_result "%PID_FILE%" "%RESULT_FILE%" 10
 if exist "%PID_FILE%" (
   set "CPID="
   for /f "usebackq delims=" %%P in ("%PID_FILE%") do if not defined CPID set "CPID=%%P"
-  if defined CPID (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "$pidValue='%CPID%'; if($pidValue -match '^\d+$'){ try { Wait-Process -Id ([int]$pidValue) -Timeout 900 -ErrorAction Stop; exit 0 } catch { try { Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue } catch {}; exit 124 } } else { exit 0 }"
-    set "WRC=%ERRORLEVEL%"
-    if "%WRC%"=="124" (
-      > "%RESULT_FILE%" (
-        echo CASE_NAME=%CASE_NAME%
-        echo STATUS=FAIL
-        echo DETAIL=timeout_900s
-      )
+)
+if defined CPID (
+  call :wait_pid_exit "%CPID%" 900
+  set "WRC=%ERRORLEVEL%"
+  if "%WRC%"=="124" (
+    > "%RESULT_FILE%" (
+      echo CASE_NAME=%CASE_NAME%
+      echo STATUS=FAIL
+      echo DETAIL=timeout_900s
     )
   )
 )
+if not exist "%RESULT_FILE%" call :wait_for_result "%RESULT_FILE%" 5
 
 set "STATUS=FAIL"
 set "DETAIL=result_missing"
@@ -127,6 +128,51 @@ if /I "%STATUS%"=="PASS" (
   call :log "[CASE] %CASE_NAME% FAIL: %DETAIL%"
 )
 exit /b 0
+
+:wait_for_pid_or_result
+set "W_PID_FILE=%~1"
+set "W_RESULT_FILE=%~2"
+set "W_TIMEOUT=%~3"
+if not defined W_TIMEOUT set "W_TIMEOUT=5"
+set /a W_ELAPSED=0
+:wait_pid_or_result_loop
+if exist "%W_PID_FILE%" exit /b 0
+if exist "%W_RESULT_FILE%" exit /b 0
+if "%W_ELAPSED%" geq "%W_TIMEOUT%" exit /b 0
+ping 127.0.0.1 -n 2 >nul
+set /a W_ELAPSED+=1
+goto wait_pid_or_result_loop
+
+:wait_for_result
+set "W_RESULT_FILE=%~1"
+set "W_TIMEOUT=%~2"
+if not defined W_TIMEOUT set "W_TIMEOUT=5"
+set /a W_ELAPSED=0
+:wait_result_loop
+if exist "%W_RESULT_FILE%" exit /b 0
+if "%W_ELAPSED%" geq "%W_TIMEOUT%" exit /b 0
+ping 127.0.0.1 -n 2 >nul
+set /a W_ELAPSED+=1
+goto wait_result_loop
+
+:wait_pid_exit
+set "WPID=%~1"
+set "WTIMEOUT=%~2"
+if not defined WTIMEOUT set "WTIMEOUT=900"
+if not defined WPID exit /b 0
+echo %WPID%| findstr /R "^[0-9][0-9]*$" >nul
+if errorlevel 1 exit /b 0
+set /a WELAPSED=0
+:wait_pid_loop
+tasklist /FI "PID eq %WPID%" | findstr /R /C:"[ ]%WPID%[ ]" >nul
+if errorlevel 1 exit /b 0
+if %WELAPSED% GEQ %WTIMEOUT% (
+  taskkill /PID %WPID% /T /F >nul 2>nul
+  exit /b 124
+)
+ping 127.0.0.1 -n 2 >nul
+set /a WELAPSED+=1
+goto wait_pid_loop
 
 :log
 echo %~1

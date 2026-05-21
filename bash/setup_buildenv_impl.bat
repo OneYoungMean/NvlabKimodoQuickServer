@@ -72,6 +72,11 @@ if errorlevel 1 (
   echo [ERROR] Docs: https://docs.astral.sh/uv/getting-started/installation/
   exit /b 1
 )
+call :ensure_local_git_lfs
+if errorlevel 1 (
+  echo [ERROR] local git/git-lfs check failed.
+  exit /b 1
+)
 
 echo [STEP] Checking network reachability for package index...
 echo [INFO] Network probe started... timeout=%NETWORK_PROBE_TIMEOUT_SEC%s
@@ -305,6 +310,31 @@ if exist "%UV_BIN%" (
 echo [ERROR] Local uv missing or unusable: %UV_BIN%
 echo [ERROR] Please place uv.exe under program\exe\uv before running setup.
 exit /b 1
+
+:ensure_local_git_lfs
+set "LOCAL_GIT_CMD=%ROOT_DIR%\program\exe\git\cmd"
+set "LOCAL_GIT_LFS=%ROOT_DIR%\program\exe\git\mingw32\bin"
+if not exist "%LOCAL_GIT_CMD%\git.exe" (
+  echo [ERROR] local git missing: %LOCAL_GIT_CMD%\git.exe
+  exit /b 1
+)
+if not exist "%LOCAL_GIT_LFS%\git-lfs.exe" (
+  echo [ERROR] local git-lfs missing: %LOCAL_GIT_LFS%\git-lfs.exe
+  exit /b 1
+)
+set "PATH=%LOCAL_GIT_CMD%;%LOCAL_GIT_LFS%;%PATH%"
+git --version >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] local git is not executable.
+  exit /b 1
+)
+git lfs version >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] local git-lfs is not executable.
+  exit /b 1
+)
+echo [OK] local git/git-lfs are ready in local context.
+exit /b 0
 
 :select_python_spec
 set "PYTHON_SPEC=3.12"
