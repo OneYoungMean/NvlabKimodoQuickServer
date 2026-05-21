@@ -25,6 +25,8 @@ set "SERVER_STARTED=0"
 set "SERVER_PID_FILE=%TEMP%\kimodo_test_server_pid_%RANDOM%%RANDOM%.txt"
 if defined KIMODO_TEST_SERVER_PID_FILE set "SERVER_PID_FILE=%KIMODO_TEST_SERVER_PID_FILE%"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
+set "SERVER_WINDOW_STYLE=%KIMODO_TEST_SERVER_WINDOW_STYLE%"
+if not defined SERVER_WINDOW_STYLE set "SERVER_WINDOW_STYLE=Normal"
 
 set "OUTPUT_MODE=%KIMODO_TEST_OUTPUT%"
 if not defined OUTPUT_MODE set "OUTPUT_MODE=console"
@@ -58,6 +60,7 @@ echo [TEST] WAIT_TIMEOUT_SEC=%WAIT_TIMEOUT_SEC%
 echo [TEST] SERVER_LOG=%RUN_LOG%
 echo [TEST] SETUP_LOG=%LOG_DIR%\setup.log
 echo [TEST] DOWNLOAD_LOG=%LOG_DIR%\download_model.log
+echo [TEST] SERVER_WINDOW_STYLE=%SERVER_WINDOW_STYLE%
 
 call :wait_setup_lock_clear
 if errorlevel 1 exit /b 1
@@ -189,7 +192,7 @@ exit /b 0
 :launch_server_background
 call :archive_file "%SERVER_PID_FILE%"
 call :archive_file "%RUN_LOG%"
-set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
 call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
 if errorlevel 1 (
   echo [ERROR] launch_server_background failed.
