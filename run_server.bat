@@ -20,6 +20,9 @@ set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "SOURCE_ROOT="
 set "MODEL_DIR_NAME="
 set "MODEL_RUN_NAME="
+set "MODEL_VALIDATE_NEEDS_REPAIR=0"
+set "VALIDATE_TARGET_LABEL="
+set "VALIDATE_TARGET_FILE="
 
 :parse_args
 if "%~1"=="" goto parsed
@@ -147,6 +150,9 @@ if "%HIGHVRAM%"=="1" (
   )
 )
 
+call :validate_safetensors_or_repair
+if errorlevel 1 exit /b 1
+
 set "PYTHONPATH=%SOURCE_ROOT%"
 set "KIMODO_ROOT_PATH=%ROOT_DIR%"
 set "CHECKPOINT_DIR=%ROOT_DIR%\models"
@@ -188,6 +194,85 @@ pushd "%ROOT_DIR%" >nul
 set "RC=%ERRORLEVEL%"
 popd >nul
 exit /b %RC%
+
+:validate_safetensors_or_repair
+set "MODEL_VALIDATE_NEEDS_REPAIR=0"
+call :validate_safetensor "main-model" "%ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors"
+if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+
+if "%HIGHVRAM%"=="1" (
+  if exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" (
+    call :validate_safetensor "meta-llama" "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors"
+    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+  )
+  if exist "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors" (
+    call :validate_safetensor "llm2vec-peft" "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors"
+    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+  )
+  if exist "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors" (
+    call :validate_safetensor "llm2vec-peft-model" "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors"
+    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+  )
+) else (
+  call :validate_safetensor "llm2vec-nf4" "%KIMODO_LLM2VEC_DIR%\model.safetensors"
+  if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+)
+
+if "%MODEL_VALIDATE_NEEDS_REPAIR%"=="0" exit /b 0
+echo [WARN] Detected corrupted safetensors file(s). Attempting one-time model re-sync...
+if "%HIGHVRAM%"=="1" (
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
+) else (
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%"
+)
+if errorlevel 1 (
+  echo [ERROR] download_model failed during auto-repair.
+  exit /b 1
+)
+
+set "MODEL_VALIDATE_NEEDS_REPAIR=0"
+call :validate_safetensor "main-model" "%ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors"
+if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+if "%HIGHVRAM%"=="1" (
+  if exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" (
+    call :validate_safetensor "meta-llama" "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors"
+    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+  )
+  if exist "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors" (
+    call :validate_safetensor "llm2vec-peft" "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors"
+    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+  )
+  if exist "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors" (
+    call :validate_safetensor "llm2vec-peft-model" "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors"
+    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+  )
+) else (
+  call :validate_safetensor "llm2vec-nf4" "%KIMODO_LLM2VEC_DIR%\model.safetensors"
+  if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+)
+
+if "%MODEL_VALIDATE_NEEDS_REPAIR%"=="1" (
+  echo [ERROR] safetensors validation still failed after auto-repair.
+  exit /b 1
+)
+echo [OK] safetensors auto-repair completed.
+exit /b 0
+
+:validate_safetensor
+set "VALIDATE_TARGET_LABEL=%~1"
+set "VALIDATE_TARGET_FILE=%~2"
+if not exist "%VALIDATE_TARGET_FILE%" (
+  echo [ERROR] Missing safetensor for %VALIDATE_TARGET_LABEL%: %VALIDATE_TARGET_FILE%
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop'; $f='%VALIDATE_TARGET_FILE%'; Add-Type -AssemblyName System.IO.Compression.FileSystem; $fs=[IO.File]::Open($f,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { $buf=New-Object byte[] 8; $read=$fs.Read($buf,0,8); if($read -lt 8){ throw 'short-header' }; $len=[BitConverter]::ToUInt64($buf,0); if($len -le 0 -or $len -gt 104857600){ throw ('invalid-header-length:' + $len) } } finally { $fs.Close() }" >nul 2>nul
+if errorlevel 1 (
+  echo [WARN] Corrupted safetensor detected ^(%VALIDATE_TARGET_LABEL%^): %VALIDATE_TARGET_FILE%
+  call :archive_file "%VALIDATE_TARGET_FILE%"
+  exit /b 1
+)
+exit /b 0
 
 :resolve_model_alias
 set "INPUT_MODEL=%~1"
