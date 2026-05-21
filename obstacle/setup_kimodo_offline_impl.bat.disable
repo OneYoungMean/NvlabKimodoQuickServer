@@ -2,13 +2,15 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT_DIR=%CD%"
+set "LOG_DIR=%ROOT_DIR%\log"
 set "SOURCE_ROOT="
 set "LOCK_FILE=%ROOT_DIR%\.setup.lock"
 set "RUN_MARKER=%ROOT_DIR%\run"
 set "SETUP_SENTINEL=%ROOT_DIR%\.kimodo_offline_setup_complete"
-set "SETUP_LOG=%ROOT_DIR%\setup_kimodo_offline.log"
+set "SETUP_LOG=%LOG_DIR%\setup_kimodo_offline.log"
 
 if not exist "%ROOT_DIR%" exit /b 1
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
 if exist "%ROOT_DIR%\pyproject.toml" set "SOURCE_ROOT=%ROOT_DIR%"
 if not defined SOURCE_ROOT if exist "%ROOT_DIR%\kimodo\pyproject.toml" set "SOURCE_ROOT=%ROOT_DIR%\kimodo"

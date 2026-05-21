@@ -3,11 +3,12 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT_DIR=%~dp0"
 if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
+set "LOG_DIR=%ROOT_DIR%\log"
 set "SOURCE_ROOT="
 set "LOCK_FILE=%ROOT_DIR%\.setup.lock"
 set "RUN_MARKER=%ROOT_DIR%\run"
 set "SETUP_SENTINEL=%ROOT_DIR%\.kimodo_offline_setup_complete"
-set "SETUP_LOG=%ROOT_DIR%\setup_kimodo_offline.log"
+set "SETUP_LOG=%LOG_DIR%\setup_kimodo_offline.log"
 set "BUILD_IMPL=%ROOT_DIR%\setup_kimodo_offline_impl.bat"
 set "CLONE_BAT=%ROOT_DIR%\models\clonemodel.bat"
 
@@ -26,6 +27,7 @@ if not exist "%CLONE_BAT%" (
   echo [ERROR] Missing model script: %CLONE_BAT%
   exit /b 1
 )
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
 > "%LOCK_FILE%" (
   echo started=%DATE% %TIME%

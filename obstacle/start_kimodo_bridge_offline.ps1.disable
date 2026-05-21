@@ -19,7 +19,8 @@ if (Test-Path -LiteralPath $resolvedRoot) {
     $resolvedRoot = (Resolve-Path -LiteralPath $resolvedRoot).Path
 }
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
-    $LogPath = Join-Path $resolvedRoot "start_kimodo_bridge_offline.log"
+    $LogDir = Join-Path $resolvedRoot "log"
+    $LogPath = Join-Path $LogDir "start_kimodo_bridge_offline.log"
 }
 
 $argsList = @()

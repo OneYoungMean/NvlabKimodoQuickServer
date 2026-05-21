@@ -22,6 +22,12 @@ from typing import Any
 import numpy as np
 
 
+def _default_bridge_log_path(root: str) -> str:
+    if not root:
+        return ""
+    return os.path.join(root, "log", "test_input_log.log")
+
+
 def _out(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
@@ -36,11 +42,14 @@ def _log(msg: str):
     if not log_path:
         root = os.environ.get("KIMODO_ROOT_PATH", "")
         if root:
-            log_path = os.path.join(root, "bridge_runtime.log")
+            log_path = _default_bridge_log_path(root)
     if not log_path:
         return
 
     try:
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
@@ -269,7 +278,7 @@ def main():
     port_file = os.path.join(kimodo_root, "serverport")
     with open(port_file, "w", encoding="utf-8") as f:
         f.write(f"{host}:{port}\n")
-    os.environ["KIMODO_BRIDGE_LOG"] = os.path.join(kimodo_root, "bridge_runtime.log")
+    os.environ["KIMODO_BRIDGE_LOG"] = _default_bridge_log_path(kimodo_root)
     _log(f"[bridge] listening host={host} port={port} model={args.model}")
 
     state = {

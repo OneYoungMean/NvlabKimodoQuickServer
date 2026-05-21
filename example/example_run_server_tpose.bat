@@ -55,6 +55,9 @@ if /I "%USE_SHARED_MODELS%"=="1" (
 
 call :decide_wait_timeout
 echo [TEST] WAIT_TIMEOUT_SEC=%WAIT_TIMEOUT_SEC%
+echo [TEST] SERVER_LOG=%RUN_LOG%
+echo [TEST] SETUP_LOG=%LOG_DIR%\setup.log
+echo [TEST] DOWNLOAD_LOG=%LOG_DIR%\download_model.log
 
 call :wait_setup_lock_clear
 if errorlevel 1 exit /b 1
@@ -186,11 +189,7 @@ exit /b 0
 :launch_server_background
 call :archive_file "%SERVER_PID_FILE%"
 call :archive_file "%RUN_LOG%"
-if /I "%OUTPUT_MODE%"=="file" (
-  set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
-) else (
-  set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','console'); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
-)
+set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
 call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
 if errorlevel 1 (
   echo [ERROR] launch_server_background failed.

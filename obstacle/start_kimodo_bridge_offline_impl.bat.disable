@@ -169,7 +169,7 @@ echo [STEP] Setup is not complete. Running setup first...
 >&2 echo [Kimodo] First-time setup detected. Initial configuration may take 10-20 minutes. Please wait patiently.
 call "%SETUP_SCRIPT%"
 if not "%ERRORLEVEL%"=="0" (
-  >&2 echo [ERROR] Setup failed. See %ROOT_DIR%\setup_kimodo_offline.log
+  >&2 echo [ERROR] Setup failed. See %ROOT_DIR%\log\setup_kimodo_offline.log
   exit /b 1
 )
 if not exist "%SETUP_SENTINEL%" (

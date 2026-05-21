@@ -8,7 +8,7 @@ for %%I in ("%SOURCE_ROOT%") do set "SOURCE_NAME=%%~nxI"
 set "TEST_ROOT=C:\nvlab\test"
 for /f %%I in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Date).ToString('yyyyMMdd_HHmmss_fff')"') do set "TS=%%I"
 set "MATRIX_ROOT=%TEST_ROOT%\%SOURCE_NAME%_%TS%_recovery_matrix"
-set "MATRIX_LOG=%MATRIX_ROOT%\recovery_matrix.log"
+set "MATRIX_LOG=%MATRIX_ROOT%\log\recovery_matrix.log"
 set "PASS_COUNT=0"
 set "FAIL_COUNT=0"
 set "SCENARIO_FAIL_LIST="
@@ -23,6 +23,7 @@ if not exist "%SOURCE_ROOT%\run_server.bat" (
 
 if not exist "%TEST_ROOT%" mkdir "%TEST_ROOT%" >nul 2>nul
 if not exist "%MATRIX_ROOT%" mkdir "%MATRIX_ROOT%" >nul 2>nul
+if not exist "%MATRIX_ROOT%\log" mkdir "%MATRIX_ROOT%\log" >nul 2>nul
 
 call :log "[MATRIX] source=%SOURCE_ROOT%"
 call :log "[MATRIX] root=%MATRIX_ROOT%"
@@ -243,7 +244,7 @@ robocopy "%SOURCE_ROOT%" "%DEST_ROOT%" /E /R:1 /W:1 /NFL /NDL /NJH /NJS ^
       "%SOURCE_ROOT%\models" "%SOURCE_ROOT%\run" "%SOURCE_ROOT%\obstacle" "%SOURCE_ROOT%\hf_cache" ^
       "%SOURCE_ROOT%\kimodo\.venv" "%SOURCE_ROOT%\kimodo\hf_cache" "%SOURCE_ROOT%\kimodo\outputs" ^
       "%SOURCE_ROOT%\kimodo\benchmark" "%SOURCE_ROOT%\kimodo\__pycache__" ^
-  /XF recovery_matrix.log "*.pyc" ".setup_new.lock" "serverport" ".run_server_state" "bridge_runtime.log" >nul
+  /XF recovery_matrix.log "*.pyc" ".setup_new.lock" "serverport" ".run_server_state" "test_input_log.log" >nul
 set "RBC=%ERRORLEVEL%"
 if %RBC% LSS 8 goto copy_ok
 if %COPY_ATTEMPT% GEQ 3 (
