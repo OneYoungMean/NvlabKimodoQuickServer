@@ -20,6 +20,8 @@ set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "SOURCE_ROOT="
 set "MODEL_DIR_NAME="
 set "MODEL_RUN_NAME="
+set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
+set "USING_EXTERNAL_MODELS=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
 set "VALIDATE_TARGET_LABEL="
 set "VALIDATE_TARGET_FILE="
@@ -65,6 +67,17 @@ if not defined SOURCE_ROOT (
   exit /b 1
 )
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
+if not defined MODELS_ROOT set "MODELS_ROOT=%ROOT_DIR%\models"
+if /I not "%MODELS_ROOT%"=="%ROOT_DIR%\models" set "USING_EXTERNAL_MODELS=1"
+if "%USING_EXTERNAL_MODELS%"=="1" (
+  if not exist "%MODELS_ROOT%" (
+    echo [ERROR] External models root not found: %MODELS_ROOT%
+    exit /b 1
+  )
+  echo [INFO] Using external models root: %MODELS_ROOT%
+) else (
+  if not exist "%MODELS_ROOT%" mkdir "%MODELS_ROOT%" >nul 2>nul
+)
 
 call :resolve_model_alias "%MODEL_NAME%"
 if errorlevel 1 exit /b 1
@@ -75,16 +88,16 @@ if exist "%SETUP_LOCK%" (
 )
 
 if /I "%HIGHVRAM%"=="1" (
-  set "KIMODO_LLM2VEC_DIR=%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct"
-  set "TEXT_ENCODERS_DIR=%ROOT_DIR%\models"
-  set "KIMODO_LLM2VEC_PEFT_DIR=%ROOT_DIR%\models\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
+  set "KIMODO_LLM2VEC_DIR=%MODELS_ROOT%\Meta-Llama-3-8B-Instruct"
+  set "TEXT_ENCODERS_DIR=%MODELS_ROOT%"
+  set "KIMODO_LLM2VEC_PEFT_DIR=%MODELS_ROOT%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
 ) else (
-  set "KIMODO_LLM2VEC_DIR=%ROOT_DIR%\models\KIMODO-Meta3_llm2vec_NF4"
+  set "KIMODO_LLM2VEC_DIR=%MODELS_ROOT%\KIMODO-Meta3_llm2vec_NF4"
   set "TEXT_ENCODERS_DIR="
   set "KIMODO_LLM2VEC_PEFT_DIR="
 )
 
-set "CUR_SIG=model=%MODEL_RUN_NAME%;highvram=%HIGHVRAM%;llm2vec=%KIMODO_LLM2VEC_DIR%"
+set "CUR_SIG=model=%MODEL_RUN_NAME%;highvram=%HIGHVRAM%;models=%MODELS_ROOT%;llm2vec=%KIMODO_LLM2VEC_DIR%"
 set "PREV_SIG="
 if exist "%SERVER_STATE%" (
   for /f "usebackq tokens=1,* delims==" %%A in ("%SERVER_STATE%") do (
@@ -116,13 +129,17 @@ if not exist "%SETUP_SENTINEL%" (
   if errorlevel 1 exit /b 1
 )
 
-echo [STEP] Downloading model assets for model=%MODEL_NAME% highvram=%HIGHVRAM%...
-if "%HIGHVRAM%"=="1" (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
+if "%USING_EXTERNAL_MODELS%"=="1" (
+  echo [STEP] External models mode enabled, skip download_model.
 ) else (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%"
+  echo [STEP] Downloading model assets for model=%MODEL_NAME% highvram=%HIGHVRAM%...
+  if "%HIGHVRAM%"=="1" (
+    call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
+  ) else (
+    call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%"
+  )
+  if errorlevel 1 exit /b 1
 )
-if errorlevel 1 exit /b 1
 
 set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
@@ -130,13 +147,13 @@ if not exist "%VENV_PY%" (
   exit /b 1
 )
 
-if not exist "%ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors" (
-  echo [ERROR] Missing model file: %ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors
+if not exist "%MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors" (
+  echo [ERROR] Missing model file: %MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors
   exit /b 1
 )
 if "%HIGHVRAM%"=="1" (
-  if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" (
-    echo [ERROR] Missing Meta-Llama model under %ROOT_DIR%\models\Meta-Llama-3-8B-Instruct
+  if not exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors" (
+    echo [ERROR] Missing Meta-Llama model under %MODELS_ROOT%\Meta-Llama-3-8B-Instruct
     exit /b 1
   )
   if not exist "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors" if not exist "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors" (
@@ -155,7 +172,7 @@ if errorlevel 1 exit /b 1
 
 set "PYTHONPATH=%SOURCE_ROOT%"
 set "KIMODO_ROOT_PATH=%ROOT_DIR%"
-set "CHECKPOINT_DIR=%ROOT_DIR%\models"
+set "CHECKPOINT_DIR=%MODELS_ROOT%"
 set "LOCAL_CACHE=true"
 set "TEXT_ENCODER_MODE=local"
 set "TEXT_ENCODER=llm2vec"
@@ -197,12 +214,12 @@ exit /b %RC%
 
 :validate_safetensors_or_repair
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
-call :validate_safetensor "main-model" "%ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors"
+call :validate_safetensor "main-model" "%MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors"
 if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
 
 if "%HIGHVRAM%"=="1" (
-  if exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" (
-    call :validate_safetensor "meta-llama" "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors"
+  if exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors" (
+    call :validate_safetensor "meta-llama" "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors"
     if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
   )
   if exist "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors" (
@@ -220,6 +237,10 @@ if "%HIGHVRAM%"=="1" (
 
 if "%MODEL_VALIDATE_NEEDS_REPAIR%"=="0" exit /b 0
 echo [WARN] Detected corrupted safetensors file(s). Attempting one-time model re-sync...
+if "%USING_EXTERNAL_MODELS%"=="1" (
+  echo [ERROR] External models mode is read-only for auto-repair. Please fix or re-sync: %MODELS_ROOT%
+  exit /b 1
+)
 if "%HIGHVRAM%"=="1" (
   call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
 ) else (
@@ -231,11 +252,11 @@ if errorlevel 1 (
 )
 
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
-call :validate_safetensor "main-model" "%ROOT_DIR%\models\%MODEL_DIR_NAME%\model.safetensors"
+call :validate_safetensor "main-model" "%MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors"
 if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
 if "%HIGHVRAM%"=="1" (
-  if exist "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors" (
-    call :validate_safetensor "meta-llama" "%ROOT_DIR%\models\Meta-Llama-3-8B-Instruct\model.safetensors"
+  if exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors" (
+    call :validate_safetensor "meta-llama" "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors"
     if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
   )
   if exist "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors" (

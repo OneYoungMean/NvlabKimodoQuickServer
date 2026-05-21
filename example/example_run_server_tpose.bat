@@ -15,6 +15,8 @@ set "USE_SHARED_MODELS=%KIMODO_TEST_USE_SHARED_MODELS%"
 if not defined USE_SHARED_MODELS set "USE_SHARED_MODELS=0"
 set "SHARED_MODELS_ROOT=%KIMODO_SHARED_MODELS_ROOT%"
 if not defined SHARED_MODELS_ROOT set "SHARED_MODELS_ROOT=C:\nvlab\models"
+set "TEST_MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
+if not defined TEST_MODELS_ROOT set "TEST_MODELS_ROOT="
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "RUN_LOG=%LOG_DIR%\example_run_server_tpose.log"
 set "CLIENT_LOG=%LOG_DIR%\example_run_server_tpose_client.log"
@@ -48,6 +50,7 @@ echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODEL=%MODEL%
 echo [TEST] HIGHVRAM=%HIGHVRAM%
 echo [TEST] USE_SHARED_MODELS=%USE_SHARED_MODELS%
+if defined TEST_MODELS_ROOT echo [TEST] TEST_MODELS_ROOT=%TEST_MODELS_ROOT%
 echo [TEST] MODE=%OUTPUT_MODE%
 
 if /I "%USE_SHARED_MODELS%"=="1" (
@@ -193,6 +196,7 @@ exit /b 0
 call :archive_file "%SERVER_PID_FILE%"
 call :archive_file "%RUN_LOG%"
 set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $envModels='%TEST_MODELS_ROOT%'; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $psi=@{ FilePath='cmd.exe'; ArgumentList=$argList; WorkingDirectory=$wd; WindowStyle=$winStyle; PassThru=$true }; if(-not [string]::IsNullOrWhiteSpace($envModels)){ $psi.Environment=@{ KIMODO_MODELS_ROOT=$envModels } }; $p=Start-Process @psi; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
 call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
 if errorlevel 1 (
   echo [ERROR] launch_server_background failed.
