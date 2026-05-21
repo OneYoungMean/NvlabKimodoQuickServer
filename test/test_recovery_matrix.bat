@@ -244,7 +244,7 @@ robocopy "%SOURCE_ROOT%" "%DEST_ROOT%" /E /R:1 /W:1 /NFL /NDL /NJH /NJS ^
       "%SOURCE_ROOT%\models" "%SOURCE_ROOT%\run" "%SOURCE_ROOT%\obstacle" "%SOURCE_ROOT%\hf_cache" ^
       "%SOURCE_ROOT%\kimodo\.venv" "%SOURCE_ROOT%\kimodo\hf_cache" "%SOURCE_ROOT%\kimodo\outputs" ^
       "%SOURCE_ROOT%\kimodo\benchmark" "%SOURCE_ROOT%\kimodo\__pycache__" ^
-  /XF recovery_matrix.log "*.pyc" ".setup_new.lock" "serverport" ".run_server_state" "test_input_log.log" >nul
+  /XF recovery_matrix.log "*.pyc" ".setup.lock" "serverport" ".run_server_state" "test_input_log.log" >nul
 set "RBC=%ERRORLEVEL%"
 if %RBC% LSS 8 goto copy_ok
 if %COPY_ATTEMPT% GEQ 3 (
@@ -354,7 +354,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$deadline=(Get-Date).AddMinutes(8); " ^
   "while((Get-Date) -lt $deadline){ " ^
   "  $hit=$false; " ^
-  "  if($target -eq 'setup'){ $hit = Test-Path (Join-Path $root '.setup_new.lock') } " ^
+  "  if($target -eq 'setup'){ $hit = Test-Path (Join-Path $root '.setup.lock') } " ^
   "  elseif($target -eq 'run'){ $hit = Test-Path (Join-Path $root 'serverport') } " ^
   "  elseif($target -eq 'test'){ $cl=Join-Path $root 'log\\example_run_server_tpose_client.log'; if(Test-Path $cl){ $hit=(Get-Content -LiteralPath $cl -Tail 20 | Select-String -Pattern 'status|ready|loading|generate' -Quiet) } } " ^
   "  if($hit){ break }; Start-Sleep -Milliseconds 500 " ^
@@ -390,7 +390,7 @@ exit /b 0
 
 :archive_stale_setup_lock
 set "TARGET_ROOT=%~1"
-set "SETUP_LOCK=%TARGET_ROOT%\.setup_new.lock"
+set "SETUP_LOCK=%TARGET_ROOT%\.setup.lock"
 if not exist "%SETUP_LOCK%" exit /b 0
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$root=[Regex]::Escape('%TARGET_ROOT%'); $busy=Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match $root -and ($_.CommandLine -match 'setup\\.bat' -or $_.CommandLine -match 'setup_buildenv_impl\\.bat') }; if($busy){ exit 1 } else { exit 0 }"

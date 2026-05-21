@@ -21,7 +21,7 @@ set "PORT_FILE=%ROOT_DIR%\serverport"
 set "RUN_LOG=%LOG_DIR%\example_run_server_tpose.log"
 set "CLIENT_LOG=%LOG_DIR%\example_run_server_tpose_client.log"
 set "CLIENT_PS1=%SCRIPT_DIR%\example_run_server_tpose_client.ps1"
-set "SETUP_LOCK=%ROOT_DIR%\.setup_new.lock"
+set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "SERVER_STARTED=0"
 set "SERVER_PID_FILE=%TEMP%\kimodo_test_server_pid_%RANDOM%%RANDOM%.txt"
@@ -196,7 +196,7 @@ exit /b 0
 call :archive_file "%SERVER_PID_FILE%"
 call :archive_file "%RUN_LOG%"
 set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
-set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $envModels='%TEST_MODELS_ROOT%'; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $psi=@{ FilePath='cmd.exe'; ArgumentList=$argList; WorkingDirectory=$wd; WindowStyle=$winStyle; PassThru=$true }; if(-not [string]::IsNullOrWhiteSpace($envModels)){ $psi.Environment=@{ KIMODO_MODELS_ROOT=$envModels } }; $p=Start-Process @psi; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $modelsRoot='%TEST_MODELS_ROOT%'; if(-not [string]::IsNullOrWhiteSpace($modelsRoot)){ $argList += @('--models-root',$modelsRoot) }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
 call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
 if errorlevel 1 (
   echo [ERROR] launch_server_background failed.

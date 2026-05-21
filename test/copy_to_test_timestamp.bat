@@ -4,6 +4,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "SOURCE_DIR=%SCRIPT_DIR%\.."
+for %%I in ("%SOURCE_DIR%") do set "SOURCE_DIR=%%~fI"
 set "TARGET_ROOT=%SOURCE_DIR%\recycle\test"
 set "TEST_BAT_REL=example\example_run_server_tpose.bat"
 set "SHARED_MODELS_SRC=C:\nvlab\models"
@@ -36,7 +37,7 @@ echo [INFO] SOURCE=%SOURCE_DIR%
 echo [INFO] DEST=%DEST_DIR%
 echo [STEP] Copying files (excluding .git/recycle)...
 
-robocopy "%SOURCE_DIR%" "%DEST_DIR%" /E /R:1 /W:1 /XD "%SOURCE_DIR%\.git" "%SOURCE_DIR%\recycle" >nul
+robocopy "%SOURCE_DIR%" "%DEST_DIR%" /E /R:1 /W:1 /XD ".git" "recycle" /XF ".git" >nul
 set "RBC=%ERRORLEVEL%"
 if %RBC% GEQ 8 (
   echo [ERROR] Copy failed. robocopy rc=%RBC%
@@ -63,6 +64,10 @@ if not exist "%DEST_TEST_BAT%" (
 
 echo [STEP] Running test: %DEST_TEST_BAT%
 set "KIMODO_TEST_MODELS_ROOT=%TEST_MODELS_ROOT%"
+set "KIMODO_TEST_SERVER_WINDOW_STYLE=Normal"
+set "KIMODO_TEST_OUTPUT=console"
+echo [INFO] KIMODO_TEST_SERVER_WINDOW_STYLE=%KIMODO_TEST_SERVER_WINDOW_STYLE%
+echo [INFO] KIMODO_TEST_OUTPUT=%KIMODO_TEST_OUTPUT%
 call "%DEST_TEST_BAT%"
 set "TEST_RC=%ERRORLEVEL%"
 echo [INFO] Test exit code: %TEST_RC%

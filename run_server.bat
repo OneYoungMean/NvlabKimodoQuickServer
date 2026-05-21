@@ -12,7 +12,7 @@ set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\run_server.log"
 set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
 set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
-set "SETUP_LOCK=%ROOT_DIR%\.setup_new.lock"
+set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "SERVER_STATE=%ROOT_DIR%\.run_server_state"
@@ -47,6 +47,12 @@ if /I "%~1"=="--output" (
 )
 if /I "%~1"=="--log" (
   set "LOG_PATH=%~2"
+  shift
+  shift
+  goto parse_args
+)
+if /I "%~1"=="--models-root" (
+  set "MODELS_ROOT=%~2"
   shift
   shift
   goto parse_args
