@@ -191,25 +191,6 @@ if errorlevel 1 (
   echo [INFO] torchruntime already present, skip reinstall.
 )
 
-echo [STEP] Ensuring PyTorch runtime...
-"%VENV_PY%" -c "import torch, torchvision, torchaudio; print(torch.__version__)" >nul 2>nul
-if errorlevel 1 (
-  "%VENV_PY%" -m torchruntime info
-  "%VENV_PY%" -m torchruntime install
-  if errorlevel 1 (
-    echo [ERROR] torchruntime install failed.
-    exit /b 1
-  )
-) else (
-  echo [INFO] torch/torchvision/torchaudio already present, skip reinstall.
-)
-
-"%VENV_PY%" -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
-if errorlevel 1 (
-  echo [ERROR] Torch import check failed after torchruntime install.
-  exit /b 1
-)
-
 echo [STEP] Ensuring bitsandbytes for 4-bit quantization...
 "%VENV_PY%" -c "import bitsandbytes as bnb; print(getattr(bnb, '__version__', 'unknown'))" >nul 2>nul
 if errorlevel 1 (
@@ -246,6 +227,7 @@ if errorlevel 1 (
 ) else (
   echo [INFO] motion_correction already present, skip reinstall.
 )
+
 
 if not exist "%ROOT_DIR%\models" mkdir "%ROOT_DIR%\models"
 
