@@ -47,7 +47,8 @@
 - `--highvram`: 启用 high-vram 模式。
 - `--models-root <path>`: 指定外部模型根目录（存在即跳过下载流程）。
 - `--output <console|file>`: 输出模式，默认 `console`。
-- `--log <path>`: `file` 模式下服务日志路径，默认 `log\run_server.log`。
+- `--log <path>`: `file` 模式下 `run_server` 自身日志路径，默认 `log\run_server.log`。
+- `bridge_server` 统一日志固定为 `log\bridge_server.log`（包含 bridge stdout/stderr/bootstrap 信息）。
 - `--force-setup`: 归档 setup sentinel 后重新 setup。
 
 关键运行变量：
@@ -81,7 +82,7 @@
 - 典型文件：
   - `log\setup.log`
   - `log\download_model.log`
-  - `log\run_server.log` 或调用方指定文件
-  - `log\bridge_bootstrap_error.log`
+  - `log\run_server.log`（或调用方指定的 run_server 日志）
+  - `log\bridge_server.log`（bridge 统一日志，含 bootstrap/stderr）
   - `log\example_run_server_tpose.log`
   - `log\example_run_server_tpose_client.log`

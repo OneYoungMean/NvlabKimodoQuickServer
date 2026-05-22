@@ -10,7 +10,8 @@ set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
 set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\run_server.log"
-set "BOOTSTRAP_LOG_PATH=%LOG_DIR%\bridge_bootstrap_error.log"
+set "BOOTSTRAP_LOG_PATH=%LOG_DIR%\bridge_server.log"
+set "BRIDGE_MESSAGE_LOG_PATH=%LOG_DIR%\bridge_message.log"
 set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
 set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
 set "RESOLVE_MODEL_ALIAS_BAT=%ROOT_DIR%\bash\resolve_model_alias.bat"
@@ -40,6 +41,8 @@ set "WATCHDOG_RUNTIME_INTERVAL_SEC=%KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC%"
 if not defined WATCHDOG_RUNTIME_INTERVAL_SEC set "WATCHDOG_RUNTIME_INTERVAL_SEC=1"
 set "WATCHDOG_IDLE_NOLOG_MAX=%KIMODO_WATCHDOG_IDLE_NOLOG_MAX%"
 if not defined WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_MAX=300"
+set "SERVER_WINDOW_STYLE=%KIMODO_SERVER_WINDOW_STYLE%"
+if not defined SERVER_WINDOW_STYLE set "SERVER_WINDOW_STYLE=Hidden"
 set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 
 :parse_args
@@ -263,15 +266,18 @@ if exist "%BRIDGE_PID_FILE%" call :archive_file "%BRIDGE_PID_FILE%"
 if /I "%OUTPUT_MODE%"=="file" (
   set "LOG_USED=%LOG_PATH%"
   echo [INFO] run_server log: !LOG_USED!
-  echo [INFO] bridge bootstrap log: %BOOTSTRAP_LOG_PATH%
+  echo [INFO] bridge server log: %BOOTSTRAP_LOG_PATH%
+  echo [INFO] bridge message log: %BRIDGE_MESSAGE_LOG_PATH%
   type nul > "!LOG_USED!"
   if exist "%BOOTSTRAP_LOG_PATH%" call :archive_file "%BOOTSTRAP_LOG_PATH%"
   type nul > "%BOOTSTRAP_LOG_PATH%"
+  if exist "%BRIDGE_MESSAGE_LOG_PATH%" call :archive_file "%BRIDGE_MESSAGE_LOG_PATH%"
+  type nul > "%BRIDGE_MESSAGE_LOG_PATH%"
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='!LOG_USED!'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -RedirectStandardError '%BOOTSTRAP_LOG_PATH%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+    "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='%BOOTSTRAP_LOG_PATH%'; $ws='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($ws)){ $ws='Hidden' }; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle $ws -RedirectStandardOutput '%BOOTSTRAP_LOG_PATH%' -RedirectStandardError '%BRIDGE_MESSAGE_LOG_PATH%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -NoNewWindow -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+    "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='%BOOTSTRAP_LOG_PATH%'; $ws='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($ws)){ $ws='Hidden' }; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle $ws -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
 )
 if errorlevel 1 (
   echo [ERROR] Failed to start bridge server process.
@@ -428,8 +434,7 @@ set "WD_PID=%~1"
 set /a WD_FAILS=0
 set "WATCHDOG_STARTED_OK=0"
 set /a WD_LOG_STALE=0
-set "WD_LOG_PATH=%ROOT_DIR%\log\bridge_server.log"
-if /I "%OUTPUT_MODE%"=="file" set "WD_LOG_PATH=%LOG_PATH%"
+set "WD_LOG_PATH=%ROOT_DIR%\log\bridge_message.log"
 set "WD_LOG_LAST="
 
 :watchdog_tick
@@ -554,13 +559,13 @@ goto wait_pid_loop
 if exist "%BOOTSTRAP_LOG_PATH%" (
   for %%I in ("%BOOTSTRAP_LOG_PATH%") do (
     if %%~zI gtr 0 (
-      echo [ERROR] bootstrap details: %BOOTSTRAP_LOG_PATH%
+      echo [ERROR] bridge details: %BOOTSTRAP_LOG_PATH%
     ) else (
-      echo [WARN] bootstrap log is empty: %BOOTSTRAP_LOG_PATH%
+      echo [WARN] bridge log is empty: %BOOTSTRAP_LOG_PATH%
     )
   )
 ) else (
-  echo [WARN] bootstrap log missing: %BOOTSTRAP_LOG_PATH%
+  echo [WARN] bridge log missing: %BOOTSTRAP_LOG_PATH%
 )
 exit /b 0
 
