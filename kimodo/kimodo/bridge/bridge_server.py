@@ -25,7 +25,7 @@ import numpy as np
 def _default_bridge_log_path(root: str) -> str:
     if not root:
         return ""
-    return os.path.join(root, "log", "test_input_log.log")
+    return os.path.join(root, "log", "bridge_server.log")
 
 
 def _out(obj):

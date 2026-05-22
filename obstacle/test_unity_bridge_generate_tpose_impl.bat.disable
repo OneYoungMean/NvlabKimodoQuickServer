@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem ------------------------------------------------------------
@@ -19,7 +19,7 @@ set "PORT_FILE=%ROOT_DIR%\serverport"
 set "LOG_FILE=%LOG_DIR%\bridge_test_generate_tpose.log"
 set "CLIENT_LOG_FILE=%LOG_DIR%\bridge_test_generate_tpose_client.log"
 set "SETUP_LOG_FILE=%LOG_DIR%\setup.log"
-set "RUNTIME_LOG_FILE=%LOG_DIR%\test_input_log.log"
+set "RUNTIME_LOG_FILE=%LOG_DIR%\bridge_server.log"
 set "LOCK_FILE=%ROOT_DIR%\.setup_new.lock"
 set "CLIENT_PS1=%ROOT_DIR%\test\test_unity_bridge_generate_tpose_client.ps1"
 set "OUTPUT_MODE=%KIMODO_TPOSE_OUTPUT%"

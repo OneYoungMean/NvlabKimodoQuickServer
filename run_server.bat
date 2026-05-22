@@ -10,6 +10,7 @@ set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
 set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\run_server.log"
+set "BOOTSTRAP_LOG_PATH=%LOG_DIR%\bridge_bootstrap_error.log"
 set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
 set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
 set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
@@ -23,8 +24,8 @@ set "MODEL_RUN_NAME="
 set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
 set "USING_EXTERNAL_MODELS=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
-set "WATCHDOG_INTERVAL_SEC=10"
-set "WATCHDOG_MAX_FAILS=60"
+set "WATCHDOG_INTERVAL_SEC=1"
+set "WATCHDOG_MAX_FAILS=3"
 set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 
 :parse_args
@@ -210,9 +211,12 @@ if exist "%BRIDGE_PID_FILE%" call :archive_file "%BRIDGE_PID_FILE%"
 if /I "%OUTPUT_MODE%"=="file" (
   set "LOG_USED=%LOG_PATH%"
   echo [INFO] run_server log: !LOG_USED!
+  echo [INFO] bridge bootstrap log: %BOOTSTRAP_LOG_PATH%
   type nul > "!LOG_USED!"
+  if exist "%BOOTSTRAP_LOG_PATH%" call :archive_file "%BOOTSTRAP_LOG_PATH%"
+  type nul > "%BOOTSTRAP_LOG_PATH%"
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $cmd='\"%VENV_PY%\" -u -m kimodo.bridge.bridge_server --model \"%MODEL_RUN_NAME%\" --kimodo-root \"%ROOT_DIR%\" >> \"!LOG_USED!\" 2>&1'; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/c',$cmd) -WorkingDirectory '%ROOT_DIR%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+    "$ErrorActionPreference='Stop'; $cmd='set ""KIMODO_BRIDGE_LOG=!LOG_USED!"" && ""%VENV_PY%"" -u -m kimodo.bridge.bridge_server --model ""%MODEL_RUN_NAME%"" --kimodo-root ""%ROOT_DIR%"" >> ""%BOOTSTRAP_LOG_PATH%"" 2>&1'; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/c',$cmd) -WorkingDirectory '%ROOT_DIR%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference='Stop'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -NoNewWindow -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
@@ -404,6 +408,7 @@ if errorlevel 1 (
     exit /b 0
   )
   echo [ERROR] Bridge process exited before becoming responsive. pid=%WD_PID%
+  call :print_bootstrap_hint
   exit /b 1
 )
 
@@ -415,6 +420,7 @@ if errorlevel 1 (
     echo [ERROR] Bridge unresponsive for %WATCHDOG_MAX_FAILS% checks. Killing pid=%WD_PID%
     call :kill_pid "%WD_PID%"
     call :archive_file "%PORT_FILE%"
+    call :print_bootstrap_hint
     exit /b 1
   )
 ) else (
@@ -439,6 +445,20 @@ exit /b 0
 set "KILL_PID_VALUE=%~1"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Stop-Process -Id %KILL_PID_VALUE% -Force -ErrorAction SilentlyContinue" >nul 2>nul
+exit /b 0
+
+:print_bootstrap_hint
+if exist "%BOOTSTRAP_LOG_PATH%" (
+  for %%I in ("%BOOTSTRAP_LOG_PATH%") do (
+    if %%~zI gtr 0 (
+      echo [ERROR] bootstrap details: %BOOTSTRAP_LOG_PATH%
+    ) else (
+      echo [WARN] bootstrap log is empty: %BOOTSTRAP_LOG_PATH%
+    )
+  )
+) else (
+  echo [WARN] bootstrap log missing: %BOOTSTRAP_LOG_PATH%
+)
 exit /b 0
 
 :archive_file

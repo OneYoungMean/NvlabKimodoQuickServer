@@ -244,7 +244,7 @@ robocopy "%SOURCE_ROOT%" "%DEST_ROOT%" /E /R:1 /W:1 /NFL /NDL /NJH /NJS ^
       "%SOURCE_ROOT%\models" "%SOURCE_ROOT%\run" "%SOURCE_ROOT%\obstacle" "%SOURCE_ROOT%\hf_cache" ^
       "%SOURCE_ROOT%\kimodo\.venv" "%SOURCE_ROOT%\kimodo\hf_cache" "%SOURCE_ROOT%\kimodo\outputs" ^
       "%SOURCE_ROOT%\kimodo\benchmark" "%SOURCE_ROOT%\kimodo\__pycache__" ^
-  /XF recovery_matrix.log "*.pyc" ".setup.lock" "serverport" ".run_server_state" "test_input_log.log" >nul
+  /XF recovery_matrix.log "*.pyc" ".setup.lock" "serverport" ".run_server_state" "bridge_server.log" >nul
 set "RBC=%ERRORLEVEL%"
 if %RBC% LSS 8 goto copy_ok
 if %COPY_ATTEMPT% GEQ 3 (

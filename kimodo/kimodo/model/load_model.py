@@ -159,7 +159,7 @@ def load_model(
     # In case, we specify a custom checkpoint directory
     configured_checkpoint_dir = get_env_var("CHECKPOINT_DIR")
     if configured_checkpoint_dir:
-        print(f"CHECKPOINT_DIR is set to {configured_checkpoint_dir}, checking the local cache...")
+        print(f"CHECKPOINT_DIR is set to {configured_checkpoint_dir}, using local-only model loading...")
         # Checkpoint folders are named by display name (e.g. Kimodo-SOMA-RP-v1)
         info = get_model_info(modelname)
         checkpoint_folder_name = info.display_name if info is not None else modelname
@@ -168,8 +168,10 @@ def load_model(
             # Fallback: try short_key for backward compatibility
             model_path = Path(configured_checkpoint_dir) / modelname
         if not model_path.exists():
-            print(f"Model folder not found at '{model_path}', downloading it from Hugging Face...")
-            model_path = _resolve_hf_model_path(modelname)
+            raise FileNotFoundError(
+                f"Model folder not found at '{model_path}' while CHECKPOINT_DIR is configured. "
+                "Local-only mode does not fallback to Hugging Face."
+            )
     else:
         # Otherwise, we load the model from the local cache or download it from Hugging Face.
         model_path = _resolve_hf_model_path(modelname)
