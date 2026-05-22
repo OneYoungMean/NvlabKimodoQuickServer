@@ -191,6 +191,13 @@ if errorlevel 1 (
   echo [INFO] torchruntime already present, skip reinstall.
 )
 
+echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
+"%VENV_PY%" -m torchruntime install torch torchvision torchaudio
+if errorlevel 1 (
+  echo [ERROR] torchruntime failed to install CUDA-enabled torch packages.
+  exit /b 1
+)
+
 echo [STEP] Validating CUDA-only torch runtime...
 "%VENV_PY%" -c "import torch,sys; ok=torch.cuda.is_available(); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if ok else 1)"
 if errorlevel 1 (
@@ -337,4 +344,5 @@ if /I "%KIMODO_PYTHON_ARCH%"=="x86" (
 set "PYTHON_SPEC=cpython-3.12.13-windows-x86_64-none"
 echo [INFO] Python arch selected: x64 ^(required by torch wheels on Windows^).
 exit /b 0
+
 
