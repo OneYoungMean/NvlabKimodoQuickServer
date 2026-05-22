@@ -22,6 +22,8 @@ set "SOURCE_ROOT="
 set "MODEL_DIR_NAME="
 set "MODEL_RUN_NAME="
 set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
+set "CONFIG_ONLY=%KIMODO_CONFIG_ONLY%"
+if not defined CONFIG_ONLY set "CONFIG_ONLY=0"
 set "USING_EXTERNAL_MODELS=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
 set "WATCHDOG_INTERVAL_SEC=3"
@@ -66,6 +68,11 @@ if /I "%~1"=="--force-setup" (
   shift
   goto parse_args
 )
+if /I "%~1"=="--config-only" (
+  set "CONFIG_ONLY=1"
+  shift
+  goto parse_args
+)
 shift
 goto parse_args
 
@@ -94,6 +101,10 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
 call :resolve_model_alias "%MODEL_NAME%"
 if errorlevel 1 exit /b 1
 
+if /I "%CONFIG_ONLY%"=="1" (
+  echo [INFO] Config-only mode enabled. Setup/download/validation will run; bridge launch is skipped.
+)
+
 if exist "%SETUP_LOCK%" (
   echo [ERROR] setup is running: %SETUP_LOCK%
   exit /b 1
@@ -117,20 +128,22 @@ if exist "%SERVER_STATE%" (
   )
 )
 
-if exist "%PORT_FILE%" (
-  if /I not "%PREV_SIG%"=="%CUR_SIG%" (
-    echo [STEP] Existing server params differ, stopping previous server...
-    call :shutdown_existing
-    if errorlevel 1 exit /b 1
-  ) else (
-    call :probe_existing_server
-    if errorlevel 1 (
-      echo [WARN] Existing server signature matches, but probe failed. Restarting...
+if /I not "%CONFIG_ONLY%"=="1" (
+  if exist "%PORT_FILE%" (
+    if /I not "%PREV_SIG%"=="%CUR_SIG%" (
+      echo [STEP] Existing server params differ, stopping previous server...
       call :shutdown_existing
       if errorlevel 1 exit /b 1
     ) else (
-      echo [INFO] Existing server already running with same params: %CUR_SIG%
-      exit /b 0
+      call :probe_existing_server
+      if errorlevel 1 (
+        echo [WARN] Existing server signature matches, but probe failed. Restarting...
+        call :shutdown_existing
+        if errorlevel 1 exit /b 1
+      ) else (
+        echo [INFO] Existing server already running with same params: %CUR_SIG%
+        exit /b 0
+      )
     )
   )
 )
@@ -200,6 +213,11 @@ set "PYTHONUNBUFFERED=1"
 if not exist "%HF_HOME%" mkdir "%HF_HOME%" >nul 2>nul
 if not exist "%TRANSFORMERS_CACHE%" mkdir "%TRANSFORMERS_CACHE%" >nul 2>nul
 if not exist "%HUGGINGFACE_HUB_CACHE%" mkdir "%HUGGINGFACE_HUB_CACHE%" >nul 2>nul
+
+if /I "%CONFIG_ONLY%"=="1" (
+  echo [OK] Config-only completed. Bridge not started.
+  exit /b 0
+)
 
 > "%SERVER_STATE%" (
   echo sig=%CUR_SIG%
