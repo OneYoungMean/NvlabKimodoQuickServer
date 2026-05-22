@@ -8,7 +8,6 @@ set "SOURCE_ROOT="
 set "LOCK_FILE=%ROOT_DIR%\.setup.lock"
 set "RUN_MARKER=%ROOT_DIR%\run"
 set "SETUP_LOG=%ROOT_DIR%\log\setup_buildenv_impl.log"
-set "NETWORK_PROBE_PS1=%ROOT_DIR%\bash\probe_network_env.ps1"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "RECOVERY_FLAG_DIR=%ROOT_DIR%\archive\recovery_flags"
 
@@ -55,9 +54,6 @@ set "UV_BIN=%ROOT_DIR%\program\exe\uv\uv.exe"
 set "UV_DEFAULT_INDEX=https://pypi.org/simple"
 set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
 set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
-set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
-set "NETWORK_PROBE_TIMEOUT_SEC=%KIMODO_NETWORK_PROBE_TIMEOUT_SEC%"
-if not defined NETWORK_PROBE_TIMEOUT_SEC set "NETWORK_PROBE_TIMEOUT_SEC=1"
 set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=%KIMODO_NETWORK_FALLBACK_HEAD_TIMEOUT_SEC%"
 if not defined NETWORK_FALLBACK_HEAD_TIMEOUT_SEC set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=3"
 set "PYTHON_SPEC="
@@ -79,31 +75,6 @@ if errorlevel 1 (
 )
 
 echo [STEP] Checking network reachability for package index...
-echo [INFO] Network probe started... timeout=%NETWORK_PROBE_TIMEOUT_SEC%s
-if exist "%NETWORK_PROBE_PS1%" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%NETWORK_PROBE_PS1%" -TimeoutSec %NETWORK_PROBE_TIMEOUT_SEC% -EmitCmdFile "%NETWORK_ENV_CMD%" -Quiet
-  if not errorlevel 1 (
-    if exist "%NETWORK_ENV_CMD%" (
-      call "%NETWORK_ENV_CMD%"
-      call :archive_file "%NETWORK_ENV_CMD%"
-    )
-    if defined KIMODO_PIP_INDEX_URL set "UV_DEFAULT_INDEX=!KIMODO_PIP_INDEX_URL!"
-  )
-)
-if defined KIMODO_PIP_BEST_NAME (
-  if defined KIMODO_PIP_BEST_MS (
-    echo [INFO] Network probe result: pip best=!KIMODO_PIP_BEST_NAME! ^(!KIMODO_PIP_BEST_MS! ms^)
-  ) else (
-    echo [INFO] Network probe result: pip best=!KIMODO_PIP_BEST_NAME!
-  )
-)
-if defined KIMODO_PY_ZIP_BEST_NAME (
-  if defined KIMODO_PY_ZIP_BEST_MS (
-    echo [INFO] Network probe result: python zip best=!KIMODO_PY_ZIP_BEST_NAME! ^(!KIMODO_PY_ZIP_BEST_MS! ms^)
-  ) else (
-    echo [INFO] Network probe result: python zip best=!KIMODO_PY_ZIP_BEST_NAME!
-  )
-)
 if defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=!UV_DEFAULT_INDEX:"=!"
 if not defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=%UV_INDEX_CANDIDATE_GLOBAL%"
 

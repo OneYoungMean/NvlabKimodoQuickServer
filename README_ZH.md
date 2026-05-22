@@ -6,7 +6,7 @@
 
 - 构建并校验运行环境：`bash\setup.bat`
 - 下载/更新模型资源：`bash\download_model.bat`
-- 按模型与显存模式启动服务：`run_server.bat` / `bash\start_server.bat`
+- 按模型与显存模式启动服务：`run_server.bat`
 - 通过 TCP 冒烟测试验证链路：`example\example_run_server_tpose.bat`
 
 ## 与旧管线差异（表格）
@@ -26,7 +26,7 @@
 
 ```bat
 bash\setup.bat --output console
-bash\start_server.bat --model Kimodo-SOMA-RP-v1 --output console
+run_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
 
 测试：
@@ -40,17 +40,8 @@ example\example_run_server_tpose.bat
 - `bash\setup.bat`
 - `bash\download_model.bat`
 - `run_server.bat`
-- `bash\start_server.bat`
 - `example\example_run_server_tpose.bat`
-
-新增 `.sh` 包装入口：
-
-- `bash\setup.sh`
-- `bash\download_model.sh`
-- `run_server.sh`
-- `bash\start_server.sh`
-
-说明：这些 `.sh` 是通过 `cmd.exe` 调用对应 `.bat`，适合 Git Bash/WSL-on-Windows。纯 Linux（没有 `cmd.exe`）不支持直接使用这些包装脚本。
+- `bash\resolve_model_alias.bat`
 
 ## 服务协议
 
@@ -108,13 +99,12 @@ example\example_run_server_tpose.bat
 ### `bash\download_model.bat`
 - `--model <name>`
 - `--highvram`
-- `--target <all|soma|nf4>`
 - `--unlock-stale`
 - `--force`
 - `--output console|file`
 - `--log <path>`
 
-### `run_server.bat` / `bash\start_server.bat`
+### `run_server.bat`
 - `--model <name>`
 - `--highvram`
 - `--output console|file`

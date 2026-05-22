@@ -16,7 +16,7 @@ Core goals:
 
 - Provision and validate runtime env (`bash\setup.bat`).
 - Download/update model assets (`bash\download_model.bat`).
-- Start Kimodo bridge server with model/VRAM options (`run_server.bat`, `bash\start_server.bat`).
+- Start Kimodo bridge server with model/VRAM options (`run_server.bat`).
 - Perform TCP smoke test (`example\example_run_server_tpose.bat`).
 
 ## New vs Legacy (Table)
@@ -37,7 +37,7 @@ Run from `C:\nvlab\NvlabKimodoQuickServer`:
 
 ```bat
 bash\setup.bat --output console
-bash\start_server.bat --model Kimodo-SOMA-RP-v1 --output console
+run_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
 
 Smoke test:
@@ -51,17 +51,8 @@ example\example_run_server_tpose.bat
 - `bash\setup.bat`
 - `bash\download_model.bat`
 - `run_server.bat`
-- `bash\start_server.bat`
 - `example\example_run_server_tpose.bat`
-
-Added shell wrappers:
-
-- `bash\setup.sh`
-- `bash\download_model.sh`
-- `run_server.sh`
-- `bash\start_server.sh`
-
-Note: `.sh` wrappers call corresponding `.bat` via `cmd.exe`. They are intended for Git Bash/WSL-on-Windows environments. Pure Linux without `cmd.exe` is not supported by these wrappers.
+- `bash\resolve_model_alias.bat`
 
 ## Protocol Supported by Server
 
@@ -119,13 +110,12 @@ Common statuses:
 ### `bash\download_model.bat`
 - `--model <name>`
 - `--highvram`
-- `--target <all|soma|nf4>`
 - `--unlock-stale`
 - `--force`
 - `--output console|file`
 - `--log <path>`
 
-### `run_server.bat` / `bash\start_server.bat`
+### `run_server.bat`
 - `--model <name>`
 - `--highvram`
 - `--output console|file`

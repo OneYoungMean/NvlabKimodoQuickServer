@@ -25,11 +25,11 @@ set "RUN_LOG=%LOG_DIR%\example_run_server_tpose.log"
 set "CLIENT_LOG=%LOG_DIR%\example_run_server_tpose_client.log"
 set "CLIENT_PS1=%SCRIPT_DIR%\example_run_server_tpose_client.ps1"
 set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
-set "SETUP_SENTINEL=%ROOT_DIR%\.setup.complete"
 set "SERVER_STARTED=0"
 set "SERVER_PID_FILE=%TEMP%\kimodo_test_server_pid_%RANDOM%%RANDOM%.txt"
 if defined KIMODO_TEST_SERVER_PID_FILE set "SERVER_PID_FILE=%KIMODO_TEST_SERVER_PID_FILE%"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
+set "RESOLVE_MODEL_ALIAS_BAT=%ROOT_DIR%\bash\resolve_model_alias.bat"
 set "SERVER_WINDOW_STYLE=%KIMODO_TEST_SERVER_WINDOW_STYLE%"
 if not defined SERVER_WINDOW_STYLE set "SERVER_WINDOW_STYLE=Normal"
 
@@ -199,8 +199,6 @@ exit /b 0
 :launch_server_background
 call :archive_file "%SERVER_PID_FILE%"
 call :archive_file "%RUN_LOG%"
-set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
-set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath); if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $modelsRoot='%TEST_MODELS_ROOT%'; if(-not [string]::IsNullOrWhiteSpace($modelsRoot)){ $argList += @('--models-root',$modelsRoot) }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
 set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $outputMode='%OUTPUT_MODE%'; if([string]::IsNullOrWhiteSpace($outputMode)){ $outputMode='console' }; if($outputMode -ieq 'file'){ $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath) } else { $argList=@('/d','/c',$launcher,'--model',$model,'--output','console') }; if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $modelsRoot='%TEST_MODELS_ROOT%'; if(-not [string]::IsNullOrWhiteSpace($modelsRoot)){ $argList += @('--models-root',$modelsRoot) }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
 call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
 if errorlevel 1 (
@@ -265,7 +263,11 @@ if not exist "%SHARED_MODELS_ROOT%" (
   exit /b 1
 )
 if not exist "%ROOT_DIR%\models" mkdir "%ROOT_DIR%\models" >nul 2>nul
-call :resolve_model_alias "%MODEL%"
+if not exist "%RESOLVE_MODEL_ALIAS_BAT%" (
+  echo [ERROR] Missing model alias resolver: %RESOLVE_MODEL_ALIAS_BAT%
+  exit /b 1
+)
+call "%RESOLVE_MODEL_ALIAS_BAT%" "%MODEL%"
 if errorlevel 1 exit /b 1
 call :copy_model_dir "%SHARED_MODELS_ROOT%\%MODEL_DIR_NAME%" "%ROOT_DIR%\models\%MODEL_DIR_NAME%"
 if errorlevel 1 exit /b 1
@@ -293,28 +295,6 @@ robocopy "%SRC_DIR%" "%DST_DIR%" /E /R:1 /W:1 /NFL /NDL /NJH /NJS >nul
 set "RBC=%ERRORLEVEL%"
 if %RBC% GEQ 8 (
   echo [ERROR] Failed to stage model directory: %SRC_DIR%
-  exit /b 1
-)
-exit /b 0
-
-:resolve_model_alias
-set "INPUT_MODEL=%~1"
-set "MODEL_DIR_NAME=%INPUT_MODEL%"
-if /I "%MODEL_DIR_NAME%"=="soma" set "MODEL_DIR_NAME=Kimodo-SOMA-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="soma-rp" set "MODEL_DIR_NAME=Kimodo-SOMA-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="kimodo-soma-rp" set "MODEL_DIR_NAME=Kimodo-SOMA-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="g1" set "MODEL_DIR_NAME=Kimodo-G1-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="g1-rp" set "MODEL_DIR_NAME=Kimodo-G1-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="kimodo-g1-rp" set "MODEL_DIR_NAME=Kimodo-G1-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="soma-seed" set "MODEL_DIR_NAME=Kimodo-SOMA-SEED-v1"
-if /I "%MODEL_DIR_NAME%"=="kimodo-soma-seed" set "MODEL_DIR_NAME=Kimodo-SOMA-SEED-v1"
-if /I "%MODEL_DIR_NAME%"=="g1-seed" set "MODEL_DIR_NAME=Kimodo-G1-SEED-v1"
-if /I "%MODEL_DIR_NAME%"=="kimodo-g1-seed" set "MODEL_DIR_NAME=Kimodo-G1-SEED-v1"
-if /I "%MODEL_DIR_NAME%"=="smplx" set "MODEL_DIR_NAME=Kimodo-SMPLX-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="smplx-rp" set "MODEL_DIR_NAME=Kimodo-SMPLX-RP-v1"
-if /I "%MODEL_DIR_NAME%"=="kimodo-smplx-rp" set "MODEL_DIR_NAME=Kimodo-SMPLX-RP-v1"
-if not "%MODEL_DIR_NAME:~0,7%"=="Kimodo-" (
-  echo [ERROR] Unsupported model alias: %INPUT_MODEL%
   exit /b 1
 )
 exit /b 0

@@ -267,6 +267,10 @@ def main():
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--kimodo-root", default=None)
     args = parser.parse_args()
+    _log(
+        f"[bridge] bootstrap start pid={os.getpid()} model={args.model} "
+        f"kimodo_root={args.kimodo_root or ''}"
+    )
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -326,9 +330,12 @@ def main():
     def _load_model_worker():
         _set_loading_message("Importing Kimodo...")
         _out({"status": "loading", "message": "Importing Kimodo..."})
+        _log("[bridge] load stage: importing torch and kimodo...")
         try:
             import torch
+            _log("[bridge] load stage: torch imported.")
             from kimodo import load_model
+            _log("[bridge] load stage: kimodo imported.")
         except Exception as exc:
             with state_lock:
                 state["error"] = f"Failed to import kimodo: {exc}"
@@ -339,6 +346,7 @@ def main():
         device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
         _set_loading_message(f"Loading {args.model} on {device}...")
         _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
+        _log(f"[bridge] load stage: load_model start model={args.model} device={device}")
         try:
             model = load_model(args.model, device=device)
         except Exception as exc:
@@ -347,6 +355,7 @@ def main():
                 state["loading"] = False
             _log(f"[bridge] load error {exc}")
             return
+        _log("[bridge] load stage: load_model done.")
 
         with state_lock:
             state["model"] = model

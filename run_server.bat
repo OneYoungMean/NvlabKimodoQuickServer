@@ -13,6 +13,7 @@ set "LOG_PATH=%LOG_DIR%\run_server.log"
 set "BOOTSTRAP_LOG_PATH=%LOG_DIR%\bridge_bootstrap_error.log"
 set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
 set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
+set "RESOLVE_MODEL_ALIAS_BAT=%ROOT_DIR%\bash\resolve_model_alias.bat"
 set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup.complete"
 set "PORT_FILE=%ROOT_DIR%\serverport"
@@ -22,14 +23,18 @@ set "SOURCE_ROOT="
 set "MODEL_DIR_NAME="
 set "MODEL_RUN_NAME="
 set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
-set "CONFIG_ONLY=%KIMODO_CONFIG_ONLY%"
-if not defined CONFIG_ONLY set "CONFIG_ONLY=0"
 set "USING_EXTERNAL_MODELS=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
-set "WATCHDOG_INTERVAL_SEC=3"
-set "WATCHDOG_MAX_FAILS=10"
-set "WATCHDOG_RUNTIME_INTERVAL_SEC=1"
-set "WATCHDOG_IDLE_NOLOG_MAX=300"
+set "WATCHDOG_INTERVAL_SEC=%KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC%"
+if not defined WATCHDOG_INTERVAL_SEC set "WATCHDOG_INTERVAL_SEC=1"
+set "WATCHDOG_MAX_FAILS=%KIMODO_WATCHDOG_STARTUP_MAX_FAILS%"
+if not defined WATCHDOG_MAX_FAILS set "WATCHDOG_MAX_FAILS=30"
+set "WATCHDOG_CONNECT_TIMEOUT_MS=%KIMODO_WATCHDOG_CONNECT_TIMEOUT_MS%"
+if not defined WATCHDOG_CONNECT_TIMEOUT_MS set "WATCHDOG_CONNECT_TIMEOUT_MS=800"
+set "WATCHDOG_RUNTIME_INTERVAL_SEC=%KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC%"
+if not defined WATCHDOG_RUNTIME_INTERVAL_SEC set "WATCHDOG_RUNTIME_INTERVAL_SEC=1"
+set "WATCHDOG_IDLE_NOLOG_MAX=%KIMODO_WATCHDOG_IDLE_NOLOG_MAX%"
+if not defined WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_MAX=300"
 set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 
 :parse_args
@@ -68,11 +73,6 @@ if /I "%~1"=="--force-setup" (
   shift
   goto parse_args
 )
-if /I "%~1"=="--config-only" (
-  set "CONFIG_ONLY=1"
-  shift
-  goto parse_args
-)
 shift
 goto parse_args
 
@@ -98,12 +98,13 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
   echo [INFO] Using runtime models root: %MODELS_ROOT%
 )
 
-call :resolve_model_alias "%MODEL_NAME%"
-if errorlevel 1 exit /b 1
-
-if /I "%CONFIG_ONLY%"=="1" (
-  echo [INFO] Config-only mode enabled. Setup/download/validation will run; bridge launch is skipped.
+if not exist "%RESOLVE_MODEL_ALIAS_BAT%" (
+  echo [ERROR] Missing model alias resolver: %RESOLVE_MODEL_ALIAS_BAT%
+  exit /b 1
 )
+call "%RESOLVE_MODEL_ALIAS_BAT%" "%MODEL_NAME%"
+if errorlevel 1 exit /b 1
+set "MODEL_RUN_NAME=%MODEL_NAME%"
 
 if exist "%SETUP_LOCK%" (
   echo [ERROR] setup is running: %SETUP_LOCK%
@@ -128,22 +129,20 @@ if exist "%SERVER_STATE%" (
   )
 )
 
-if /I not "%CONFIG_ONLY%"=="1" (
-  if exist "%PORT_FILE%" (
-    if /I not "%PREV_SIG%"=="%CUR_SIG%" (
-      echo [STEP] Existing server params differ, stopping previous server...
+if exist "%PORT_FILE%" (
+  if /I not "%PREV_SIG%"=="%CUR_SIG%" (
+    echo [STEP] Existing server params differ, stopping previous server...
+    call :shutdown_existing
+    if errorlevel 1 exit /b 1
+  ) else (
+    call :probe_existing_server
+    if errorlevel 1 (
+      echo [WARN] Existing server signature matches, but probe failed. Restarting...
       call :shutdown_existing
       if errorlevel 1 exit /b 1
     ) else (
-      call :probe_existing_server
-      if errorlevel 1 (
-        echo [WARN] Existing server signature matches, but probe failed. Restarting...
-        call :shutdown_existing
-        if errorlevel 1 exit /b 1
-      ) else (
-        echo [INFO] Existing server already running with same params: %CUR_SIG%
-        exit /b 0
-      )
+      echo [INFO] Existing server already running with same params: %CUR_SIG%
+      exit /b 0
     )
   )
 )
@@ -213,11 +212,6 @@ set "PYTHONUNBUFFERED=1"
 if not exist "%HF_HOME%" mkdir "%HF_HOME%" >nul 2>nul
 if not exist "%TRANSFORMERS_CACHE%" mkdir "%TRANSFORMERS_CACHE%" >nul 2>nul
 if not exist "%HUGGINGFACE_HUB_CACHE%" mkdir "%HUGGINGFACE_HUB_CACHE%" >nul 2>nul
-
-if /I "%CONFIG_ONLY%"=="1" (
-  echo [OK] Config-only completed. Bridge not started.
-  exit /b 0
-)
 
 > "%SERVER_STATE%" (
   echo sig=%CUR_SIG%
@@ -343,30 +337,6 @@ if errorlevel 1 (
 )
 exit /b 0
 
-:resolve_model_alias
-set "INPUT_MODEL=%~1"
-set "MODEL_RUN_NAME=%INPUT_MODEL%"
-if /I "%MODEL_RUN_NAME%"=="soma" set "MODEL_RUN_NAME=Kimodo-SOMA-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="soma-rp" set "MODEL_RUN_NAME=Kimodo-SOMA-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="kimodo-soma-rp" set "MODEL_RUN_NAME=Kimodo-SOMA-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="g1" set "MODEL_RUN_NAME=Kimodo-G1-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="g1-rp" set "MODEL_RUN_NAME=Kimodo-G1-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="kimodo-g1-rp" set "MODEL_RUN_NAME=Kimodo-G1-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="soma-seed" set "MODEL_RUN_NAME=Kimodo-SOMA-SEED-v1"
-if /I "%MODEL_RUN_NAME%"=="kimodo-soma-seed" set "MODEL_RUN_NAME=Kimodo-SOMA-SEED-v1"
-if /I "%MODEL_RUN_NAME%"=="g1-seed" set "MODEL_RUN_NAME=Kimodo-G1-SEED-v1"
-if /I "%MODEL_RUN_NAME%"=="kimodo-g1-seed" set "MODEL_RUN_NAME=Kimodo-G1-SEED-v1"
-if /I "%MODEL_RUN_NAME%"=="smplx" set "MODEL_RUN_NAME=Kimodo-SMPLX-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="smplx-rp" set "MODEL_RUN_NAME=Kimodo-SMPLX-RP-v1"
-if /I "%MODEL_RUN_NAME%"=="kimodo-smplx-rp" set "MODEL_RUN_NAME=Kimodo-SMPLX-RP-v1"
-set "MODEL_DIR_NAME=%MODEL_RUN_NAME%"
-if not "%MODEL_RUN_NAME:~0,7%"=="Kimodo-" (
-  echo [ERROR] Unsupported --model: %INPUT_MODEL%
-  echo [ERROR] Example: Kimodo-SOMA-RP-v1, Kimodo-G1-RP-v1, Kimodo-SMPLX-RP-v1
-  exit /b 1
-)
-exit /b 0
-
 :shutdown_existing
 set "HOST="
 set "PORT="
@@ -411,7 +381,7 @@ if not defined PHOST exit /b 1
 if not defined PPORT exit /b 1
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $h='%PHOST%'; $p=[int]%PPORT%; $c=$null; try { $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if(-not $iar.AsyncWaitHandle.WaitOne(2000)){ throw 'connect-timeout' }; $c.EndConnect($iar); exit 0 } finally { if($c){$c.Close()} }" >nul 2>nul
+  "$ErrorActionPreference='Stop'; $h='%PHOST%'; $p=[int]%PPORT%; $to=[int]%WATCHDOG_CONNECT_TIMEOUT_MS%; $c=$null; try { $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if(-not $iar.AsyncWaitHandle.WaitOne($to)){ throw 'connect-timeout' }; $c.EndConnect($iar); exit 0 } finally { if($c){$c.Close()} }" >nul 2>nul
 if errorlevel 1 exit /b 1
 exit /b 0
 
