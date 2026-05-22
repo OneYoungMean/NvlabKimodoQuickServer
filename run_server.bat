@@ -23,7 +23,10 @@ set "SOURCE_ROOT="
 set "MODEL_DIR_NAME="
 set "MODEL_RUN_NAME="
 set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
+set "VENV_PATH_ARG="
+set "VENV_PY="
 set "USING_EXTERNAL_MODELS=0"
+set "USING_EXTERNAL_VENV=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
 set "WATCHDOG_INTERVAL_SEC=%KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC%"
 if not defined WATCHDOG_INTERVAL_SEC set "WATCHDOG_INTERVAL_SEC=1"
@@ -68,6 +71,12 @@ if /I "%~1"=="--models-root" (
   shift
   goto parse_args
 )
+if /I "%~1"=="--venv" (
+  set "VENV_PATH_ARG=%~2"
+  shift
+  shift
+  goto parse_args
+)
 if /I "%~1"=="--force-setup" (
   call :archive_file "%SETUP_SENTINEL%"
   shift
@@ -82,6 +91,12 @@ if not defined SOURCE_ROOT if exist "%ROOT_DIR%\kimodo\pyproject.toml" set "SOUR
 if not defined SOURCE_ROOT (
   echo [ERROR] Invalid project root: %ROOT_DIR%
   exit /b 1
+)
+if defined VENV_PATH_ARG (
+  call :resolve_venv_python "%VENV_PATH_ARG%"
+  if errorlevel 1 exit /b 1
+  set "USING_EXTERNAL_VENV=1"
+  echo [INFO] Using external venv python: %VENV_PY%
 )
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not defined MODELS_ROOT set "MODELS_ROOT=%ROOT_DIR%\models"
@@ -106,9 +121,11 @@ call "%RESOLVE_MODEL_ALIAS_BAT%" "%MODEL_NAME%"
 if errorlevel 1 exit /b 1
 set "MODEL_RUN_NAME=%MODEL_NAME%"
 
-if exist "%SETUP_LOCK%" (
-  echo [ERROR] setup is running: %SETUP_LOCK%
-  exit /b 1
+if "%USING_EXTERNAL_VENV%"=="0" (
+  if exist "%SETUP_LOCK%" (
+    echo [ERROR] setup is running: %SETUP_LOCK%
+    exit /b 1
+  )
 )
 
 if /I "%HIGHVRAM%"=="1" (
@@ -122,6 +139,7 @@ if /I "%HIGHVRAM%"=="1" (
 )
 
 set "CUR_SIG=model=%MODEL_RUN_NAME%;highvram=%HIGHVRAM%;models=%MODELS_ROOT%;llm2vec=%KIMODO_LLM2VEC_DIR%"
+if defined VENV_PY set "CUR_SIG=%CUR_SIG%;venv=%VENV_PY%"
 set "PREV_SIG="
 if exist "%SERVER_STATE%" (
   for /f "usebackq tokens=1,* delims==" %%A in ("%SERVER_STATE%") do (
@@ -147,10 +165,14 @@ if exist "%PORT_FILE%" (
   )
 )
 
-if not exist "%SETUP_SENTINEL%" (
-  echo [STEP] setup not found, running setup...
-  call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%LOG_DIR%\setup.log"
-  if errorlevel 1 exit /b 1
+if "%USING_EXTERNAL_VENV%"=="1" (
+  echo [STEP] External venv mode enabled, skip setup.
+) else (
+  if not exist "%SETUP_SENTINEL%" (
+    echo [STEP] setup not found, running setup...
+    call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%LOG_DIR%\setup.log"
+    if errorlevel 1 exit /b 1
+  )
 )
 
 if "%USING_EXTERNAL_MODELS%"=="1" (
@@ -165,7 +187,7 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
   if errorlevel 1 exit /b 1
 )
 
-set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
+if not defined VENV_PY set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
   echo [ERROR] Missing venv python: %VENV_PY%
   exit /b 1
@@ -248,7 +270,7 @@ if not defined SERVER_PID (
   echo [ERROR] Missing bridge PID in %BRIDGE_PID_FILE%
   exit /b 1
 )
-echo [INFO] Bridge watchdog started. pid=%SERVER_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
+echo [INFO] Bridge watchdog started. pid=%SERVER_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% connect_timeout=%WATCHDOG_CONNECT_TIMEOUT_MS%ms runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
 call :watchdog_loop "%SERVER_PID%"
 set "RC=%ERRORLEVEL%"
 call :archive_file "%BRIDGE_PID_FILE%"
@@ -524,6 +546,28 @@ if exist "%BOOTSTRAP_LOG_PATH%" (
 ) else (
   echo [WARN] bootstrap log missing: %BOOTSTRAP_LOG_PATH%
 )
+exit /b 0
+
+:resolve_venv_python
+set "VENV_INPUT=%~1"
+if not defined VENV_INPUT (
+  echo [ERROR] --venv requires a path.
+  exit /b 1
+)
+for %%I in ("%VENV_INPUT%") do set "VENV_INPUT_ABS=%%~fI"
+set "VENV_CAND=%VENV_INPUT_ABS%"
+if /I "%VENV_CAND:~-10%"=="python.exe" goto venv_resolved
+if /I "%VENV_CAND:~-8%"=="\Scripts" (
+  set "VENV_CAND=%VENV_CAND%\python.exe"
+) else (
+  set "VENV_CAND=%VENV_CAND%\Scripts\python.exe"
+)
+:venv_resolved
+if not exist "%VENV_CAND%" (
+  echo [ERROR] Invalid --venv path, python not found: %VENV_CAND%
+  exit /b 1
+)
+for %%I in ("%VENV_CAND%") do set "VENV_PY=%%~fI"
 exit /b 0
 
 :archive_file
