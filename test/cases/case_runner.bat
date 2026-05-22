@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
@@ -67,7 +67,7 @@ if not exist "%TEST_BAT%" (
 )
 
 if /I "%CASE_NAME%"=="setup_not_started" (
-  if exist "%RUN_ROOT%\.setup_new_complete" move "%RUN_ROOT%\.setup_new_complete" "%RUN_ROOT%\archive\recycle\.setup_new_complete.%RANDOM%" >nul 2>nul
+  if exist "%RUN_ROOT%\.setup.complete" move "%RUN_ROOT%\.setup.complete" "%RUN_ROOT%\archive\recycle\.setup.complete.%RANDOM%" >nul 2>nul
 )
 
 set "KIMODO_TEST_WAIT_TIMEOUT_SEC=900"
@@ -122,4 +122,6 @@ set "DETAIL=%~2"
   echo RUN_ROOT=%RUN_ROOT%
 )
 exit /b 0
+
+
 

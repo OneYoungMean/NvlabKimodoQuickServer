@@ -1,4 +1,4 @@
-# NvlabKimodoQuickServer
+﻿# NvlabKimodoQuickServer
 
 This directory is a clean bridge runtime pipeline for Kimodo.
 
@@ -144,7 +144,7 @@ Supported model names include:
 
 `run_server.bat` will:
 
-1. verify setup sentinel `.setup_new_complete`
+1. verify setup sentinel `.setup.complete`
 2. run setup if missing
 3. run model download for selected model/vram mode
 4. set local runtime env vars (`HF_HOME`, offline flags, `CHECKPOINT_DIR`, `KIMODO_ROOT_PATH`, etc.)
@@ -192,3 +192,5 @@ When running example, console always prints full client output and also writes i
 - Restricted network can break git clone/lfs pulls, especially large model repos.
 - Partial model directory states may require `--force` or lock rotation (`--unlock-stale`).
 - Existing stale `serverport` or hung old process may require manual inspection if graceful `quit` fails.
+
+

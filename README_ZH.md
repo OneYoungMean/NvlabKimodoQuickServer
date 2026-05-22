@@ -133,7 +133,7 @@ example\example_run_server_tpose.bat
 
 `run_server.bat` 会执行：
 
-1. 校验 setup 哨兵 `.setup_new_complete`
+1. 校验 setup 哨兵 `.setup.complete`
 2. 缺失则先跑 setup
 3. 按模型/显存模式下载模型
 4. 注入本地运行环境变量（`HF_HOME`、offline flags、`CHECKPOINT_DIR`、`KIMODO_ROOT_PATH` 等）
@@ -181,4 +181,6 @@ example\example_run_server_tpose.bat
 - 网络受限时，git clone/lfs pull 可能失败（特别是大模型仓库）。
 - 模型目录半残状态可能需要 `--force` 或 `--unlock-stale`。
 - 如果旧服务未正常退出，可能需要手动排查 `serverport` 与旧进程状态。
+
+
 

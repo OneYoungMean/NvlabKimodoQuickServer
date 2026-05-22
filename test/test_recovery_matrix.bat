@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions DisableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
@@ -268,9 +268,9 @@ if not exist "%TEST_BAT%" (
   call :log "[ERROR] missing test bat: %TEST_BAT%"
   exit /b 1
 )
-if exist "%CASE_ROOT%\.setup_new_complete" if not exist "%CASE_ROOT%\kimodo\.venv\Scripts\python.exe" (
+if exist "%CASE_ROOT%\.setup.complete" if not exist "%CASE_ROOT%\kimodo\.venv\Scripts\python.exe" (
   call :log "[WARN] setup sentinel exists but .venv missing, forcing setup rerun."
-  call :archive_path "%CASE_ROOT%\.setup_new_complete"
+  call :archive_path "%CASE_ROOT%\.setup.complete"
 )
 
 set "KIMODO_TEST_OUTPUT=file"
@@ -339,7 +339,7 @@ if not exist "%TEST_BAT%" (
   exit /b 1
 )
 pushd "%CASE_ROOT%" >nul
-if /I "%INT_TARGET%"=="setup" if exist ".setup_new_complete" call :archive_path "%CASE_ROOT%\.setup_new_complete"
+if /I "%INT_TARGET%"=="setup" if exist ".setup.complete" call :archive_path "%CASE_ROOT%\.setup.complete"
 if not exist "%CASE_ROOT%\log" mkdir "%CASE_ROOT%\log" >nul 2>nul
 if exist "%INT_PID_FILE%" call :archive_path "%INT_PID_FILE%"
 set "KIMODO_TEST_OUTPUT=file"
@@ -382,8 +382,8 @@ exit /b 0
 
 :force_setup_not_started
 set "TARGET_ROOT=%~1"
-if exist "%TARGET_ROOT%\.setup_new_complete" (
-  call :archive_path "%TARGET_ROOT%\.setup_new_complete"
+if exist "%TARGET_ROOT%\.setup.complete" (
+  call :archive_path "%TARGET_ROOT%\.setup.complete"
 )
 set "KIMODO_TEST_FORCE_SETUP_NOT_STARTED=1"
 exit /b 0
@@ -445,3 +445,5 @@ exit /b 0
 echo %~1
 >> "%MATRIX_LOG%" echo %~1
 exit /b 0
+
+

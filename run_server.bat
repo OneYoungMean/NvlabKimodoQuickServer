@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
@@ -13,7 +13,7 @@ set "LOG_PATH=%LOG_DIR%\run_server.log"
 set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
 set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
 set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
-set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
+set "SETUP_SENTINEL=%ROOT_DIR%\.setup.complete"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "SERVER_STATE=%ROOT_DIR%\.run_server_state"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
@@ -23,8 +23,9 @@ set "MODEL_RUN_NAME="
 set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
 set "USING_EXTERNAL_MODELS=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
-set "VALIDATE_TARGET_LABEL="
-set "VALIDATE_TARGET_FILE="
+set "WATCHDOG_INTERVAL_SEC=10"
+set "WATCHDOG_MAX_FAILS=60"
+set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 
 :parse_args
 if "%~1"=="" goto parsed
@@ -74,6 +75,7 @@ if not defined SOURCE_ROOT (
 )
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not defined MODELS_ROOT set "MODELS_ROOT=%ROOT_DIR%\models"
+for %%I in ("%MODELS_ROOT%") do set "MODELS_ROOT=%%~fI"
 if /I not "%MODELS_ROOT%"=="%ROOT_DIR%\models" set "USING_EXTERNAL_MODELS=1"
 if "%USING_EXTERNAL_MODELS%"=="1" (
   if not exist "%MODELS_ROOT%" (
@@ -83,6 +85,7 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
   echo [INFO] Using external models root: %MODELS_ROOT%
 ) else (
   if not exist "%MODELS_ROOT%" mkdir "%MODELS_ROOT%" >nul 2>nul
+  echo [INFO] Using runtime models root: %MODELS_ROOT%
 )
 
 call :resolve_model_alias "%MODEL_NAME%"
@@ -184,8 +187,8 @@ set "TEXT_ENCODER_MODE=local"
 set "TEXT_ENCODER=llm2vec"
 set "HF_HOME=%ROOT_DIR%\hf_cache"
 set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
-set "HUGGINGFACE_HUB_CACHE=%HF_HOME%\hub"
 set "HF_HUB_CACHE=%HF_HOME%\hub"
+set "HUGGINGFACE_HUB_CACHE=%HF_HOME%\hub"
 set "TRANSFORMERS_OFFLINE=1"
 set "HF_HUB_OFFLINE=1"
 set "HF_DATASETS_OFFLINE=1"
@@ -201,21 +204,36 @@ if not exist "%HUGGINGFACE_HUB_CACHE%" mkdir "%HUGGINGFACE_HUB_CACHE%" >nul 2>nu
   echo highvram=%HIGHVRAM%
 )
 
+set "KIMODO_IDLE_TIMEOUT_SEC=600"
+if exist "%BRIDGE_PID_FILE%" call :archive_file "%BRIDGE_PID_FILE%"
+
 if /I "%OUTPUT_MODE%"=="file" (
   set "LOG_USED=%LOG_PATH%"
-  if exist "!LOG_USED!" set "LOG_USED=%LOG_DIR%\\run_server_!RANDOM!!RANDOM!.log"
   echo [INFO] run_server log: !LOG_USED!
-  pushd "%ROOT_DIR%" >nul
-  "%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_RUN_NAME%" --kimodo-root "%ROOT_DIR%" > "!LOG_USED!" 2>&1
-  set "RC=%ERRORLEVEL%"
-  popd >nul
-  exit /b %RC%
+  type nul > "!LOG_USED!"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ErrorActionPreference='Stop'; $cmd='\"%VENV_PY%\" -u -m kimodo.bridge.bridge_server --model \"%MODEL_RUN_NAME%\" --kimodo-root \"%ROOT_DIR%\" >> \"!LOG_USED!\" 2>&1'; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/c',$cmd) -WorkingDirectory '%ROOT_DIR%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ErrorActionPreference='Stop'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -NoNewWindow -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+)
+if errorlevel 1 (
+  echo [ERROR] Failed to start bridge server process.
+  exit /b 1
 )
 
-pushd "%ROOT_DIR%" >nul
-"%VENV_PY%" -u -m kimodo.bridge.bridge_server --model "%MODEL_RUN_NAME%" --kimodo-root "%ROOT_DIR%"
+set "SERVER_PID="
+for /f "usebackq tokens=* delims=" %%I in ("%BRIDGE_PID_FILE%") do (
+  if not defined SERVER_PID set "SERVER_PID=%%I"
+)
+if not defined SERVER_PID (
+  echo [ERROR] Missing bridge PID in %BRIDGE_PID_FILE%
+  exit /b 1
+)
+echo [INFO] Bridge watchdog started. pid=%SERVER_PID% interval=%WATCHDOG_INTERVAL_SEC%s max_fails=%WATCHDOG_MAX_FAILS%
+call :watchdog_loop "%SERVER_PID%"
 set "RC=%ERRORLEVEL%"
-popd >nul
+call :archive_file "%BRIDGE_PID_FILE%"
 exit /b %RC%
 
 :validate_safetensors_or_repair
@@ -373,6 +391,56 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 if errorlevel 1 exit /b 1
 exit /b 0
 
+:watchdog_loop
+set "WD_PID=%~1"
+set /a WD_FAILS=0
+set "WATCHDOG_STARTED_OK=0"
+
+:watchdog_tick
+call :is_pid_running "%WD_PID%"
+if errorlevel 1 (
+  if "%WATCHDOG_STARTED_OK%"=="1" (
+    echo [INFO] Bridge process exited. pid=%WD_PID%
+    exit /b 0
+  )
+  echo [ERROR] Bridge process exited before becoming responsive. pid=%WD_PID%
+  exit /b 1
+)
+
+call :probe_existing_server
+if errorlevel 1 (
+  set /a WD_FAILS+=1
+  echo [WARN] Bridge ping failed ^(!WD_FAILS!/%WATCHDOG_MAX_FAILS%^)
+  if !WD_FAILS! geq %WATCHDOG_MAX_FAILS% (
+    echo [ERROR] Bridge unresponsive for %WATCHDOG_MAX_FAILS% checks. Killing pid=%WD_PID%
+    call :kill_pid "%WD_PID%"
+    call :archive_file "%PORT_FILE%"
+    exit /b 1
+  )
+) else (
+  if "%WATCHDOG_STARTED_OK%"=="0" (
+    echo [INFO] Bridge became responsive.
+    set "WATCHDOG_STARTED_OK=1"
+  )
+  set /a WD_FAILS=0
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds %WATCHDOG_INTERVAL_SEC%" >nul 2>nul
+goto watchdog_tick
+
+:is_pid_running
+set "CHECK_PID=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p=Get-Process -Id %CHECK_PID% -ErrorAction SilentlyContinue; if($p){ exit 0 } else { exit 1 }" >nul 2>nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:kill_pid
+set "KILL_PID_VALUE=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "Stop-Process -Id %KILL_PID_VALUE% -Force -ErrorAction SilentlyContinue" >nul 2>nul
+exit /b 0
+
 :archive_file
 set "ARCHIVE_TARGET=%~1"
 if not exist "%ARCHIVE_TARGET%" exit /b 0
@@ -383,3 +451,5 @@ set "BASE=%~nx1"
 set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
 move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
 exit /b 0
+
+

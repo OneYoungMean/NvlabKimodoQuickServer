@@ -291,6 +291,13 @@ def main():
         "loading_started_at": time.time(),
     }
     state_lock = threading.Lock()
+    idle_timeout_seconds = max(1, int(float(os.environ.get("KIMODO_IDLE_TIMEOUT_SEC", "600"))))
+    last_command_ts = time.time()
+    last_command_lock = threading.Lock()
+    active_command_count = 0
+    active_command_lock = threading.Lock()
+    quitting = False
+    quitting_lock = threading.Lock()
 
     def _set_loading_message(message: str):
         with state_lock:
@@ -361,14 +368,64 @@ def main():
     threading.Thread(target=_initializing_heartbeat_worker, daemon=True).start()
     threading.Thread(target=_load_model_worker, daemon=True).start()
 
-    quitting = False
+    def _is_quitting() -> bool:
+        with quitting_lock:
+            return quitting
+
+    def _set_quitting() -> None:
+        nonlocal quitting
+        with quitting_lock:
+            quitting = True
+
+    def _touch_last_command() -> None:
+        nonlocal last_command_ts
+        with last_command_lock:
+            last_command_ts = time.time()
+
+    def _command_started() -> None:
+        nonlocal active_command_count
+        with active_command_lock:
+            active_command_count += 1
+
+    def _command_finished() -> None:
+        nonlocal active_command_count
+        with active_command_lock:
+            active_command_count = max(0, active_command_count - 1)
+
+    def _idle_watchdog_worker():
+        while not _is_quitting():
+            time.sleep(1.0)
+            with active_command_lock:
+                busy = active_command_count > 0
+            if busy:
+                continue
+            with last_command_lock:
+                idle_seconds = time.time() - last_command_ts
+            if idle_seconds >= idle_timeout_seconds:
+                _log(
+                    f"[bridge] idle timeout reached: {int(idle_seconds)}s >= {idle_timeout_seconds}s, shutting down"
+                )
+                _set_quitting()
+                try:
+                    server.close()
+                except Exception:
+                    pass
+                return
+
+    threading.Thread(target=_idle_watchdog_worker, daemon=True).start()
+
     try:
-        while not quitting:
-            conn, _addr = server.accept()
+        while not _is_quitting():
+            try:
+                conn, _addr = server.accept()
+            except OSError:
+                if _is_quitting():
+                    break
+                raise
             _log(f"[bridge] accept {_addr}")
             with conn:
                 file = conn.makefile("rwb")
-                while not quitting:
+                while not _is_quitting():
                     line = file.readline()
                     if not line:
                         break
@@ -382,8 +439,10 @@ def main():
                         continue
 
                     cmd = req.get("cmd", "")
+                    _touch_last_command()
                     _log(f"[bridge] cmd={cmd}")
                     stage = f"cmd:{cmd}" if cmd else "cmd:unknown"
+                    _command_started()
                     try:
                         if cmd == "ping":
                             with state_lock:
@@ -447,7 +506,11 @@ def main():
                             resp = {"status": "done", "motion_json_compact": motion_data.to_compact_json()}
                         elif cmd == "quit":
                             resp = {"status": "bye"}
-                            quitting = True
+                            _set_quitting()
+                            try:
+                                server.close()
+                            except Exception:
+                                pass
                         else:
                             resp = {"status": "error", "message": f"Unknown cmd: {cmd!r}"}
                     except Exception as exc:
@@ -460,6 +523,8 @@ def main():
                             "traceback": traceback.format_exc(),
                         }
                         _log(f"[bridge] error {exc}")
+                    finally:
+                        _command_finished()
 
                     file.write((json.dumps(resp) + "\n").encode("utf-8"))
                     file.flush()

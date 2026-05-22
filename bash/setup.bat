@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
@@ -9,7 +9,7 @@ set "SOURCE_ROOT="
 set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\setup.log"
 set "LOCK_FILE=%ROOT_DIR%\.setup.lock"
-set "SENTINEL=%ROOT_DIR%\.setup_new_complete"
+set "SENTINEL=%ROOT_DIR%\.setup.complete"
 set "SETUP_BUILD_IMPL=%ROOT_DIR%\bash\setup_buildenv_impl.bat"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 
@@ -119,3 +119,5 @@ set "BASE=%~nx1"
 set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
 move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
 exit /b 0
+
+

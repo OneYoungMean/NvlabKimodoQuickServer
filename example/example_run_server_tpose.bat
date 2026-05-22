@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
@@ -25,7 +25,7 @@ set "RUN_LOG=%LOG_DIR%\example_run_server_tpose.log"
 set "CLIENT_LOG=%LOG_DIR%\example_run_server_tpose_client.log"
 set "CLIENT_PS1=%SCRIPT_DIR%\example_run_server_tpose_client.ps1"
 set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
-set "SETUP_SENTINEL=%ROOT_DIR%\.setup_new_complete"
+set "SETUP_SENTINEL=%ROOT_DIR%\.setup.complete"
 set "SERVER_STARTED=0"
 set "SERVER_PID_FILE=%TEMP%\kimodo_test_server_pid_%RANDOM%%RANDOM%.txt"
 if defined KIMODO_TEST_SERVER_PID_FILE set "SERVER_PID_FILE=%KIMODO_TEST_SERVER_PID_FILE%"
@@ -304,3 +304,5 @@ set "BASE=%~nx1"
 set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
 move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
 exit /b 0
+
+
