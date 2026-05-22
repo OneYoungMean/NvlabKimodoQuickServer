@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
@@ -24,8 +24,10 @@ set "MODEL_RUN_NAME="
 set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
 set "USING_EXTERNAL_MODELS=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
-set "WATCHDOG_INTERVAL_SEC=1"
-set "WATCHDOG_MAX_FAILS=3"
+set "WATCHDOG_INTERVAL_SEC=3"
+set "WATCHDOG_MAX_FAILS=10"
+set "WATCHDOG_RUNTIME_INTERVAL_SEC=1"
+set "WATCHDOG_IDLE_NOLOG_MAX=300"
 set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 
 :parse_args
@@ -216,7 +218,7 @@ if /I "%OUTPUT_MODE%"=="file" (
   if exist "%BOOTSTRAP_LOG_PATH%" call :archive_file "%BOOTSTRAP_LOG_PATH%"
   type nul > "%BOOTSTRAP_LOG_PATH%"
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $cmd='set ""KIMODO_BRIDGE_LOG=!LOG_USED!"" && ""%VENV_PY%"" -u -m kimodo.bridge.bridge_server --model ""%MODEL_RUN_NAME%"" --kimodo-root ""%ROOT_DIR%"" >> ""%BOOTSTRAP_LOG_PATH%"" 2>&1'; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/c',$cmd) -WorkingDirectory '%ROOT_DIR%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+    "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='!LOG_USED!'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -RedirectStandardError '%BOOTSTRAP_LOG_PATH%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference='Stop'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -NoNewWindow -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
@@ -234,7 +236,7 @@ if not defined SERVER_PID (
   echo [ERROR] Missing bridge PID in %BRIDGE_PID_FILE%
   exit /b 1
 )
-echo [INFO] Bridge watchdog started. pid=%SERVER_PID% interval=%WATCHDOG_INTERVAL_SEC%s max_fails=%WATCHDOG_MAX_FAILS%
+echo [INFO] Bridge watchdog started. pid=%SERVER_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
 call :watchdog_loop "%SERVER_PID%"
 set "RC=%ERRORLEVEL%"
 call :archive_file "%BRIDGE_PID_FILE%"
@@ -391,7 +393,7 @@ if not defined PHOST exit /b 1
 if not defined PPORT exit /b 1
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $h='%PHOST%'; $p=[int]%PPORT%; $c=$null; $s=$null; $w=$null; $r=$null; try { $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if(-not $iar.AsyncWaitHandle.WaitOne(2000)){ throw 'connect-timeout' }; $c.EndConnect($iar); $s=$c.GetStream(); $s.ReadTimeout=2000; $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $r=New-Object IO.StreamReader($s); $w.WriteLine('{""cmd"":""ping""}'); $line=$r.ReadLine(); if([string]::IsNullOrWhiteSpace($line)){ throw 'empty-response' }; $obj=$line | ConvertFrom-Json; if($obj.status -in @('pong','loading','ready')){ exit 0 }; throw ('bad-status:' + [string]$obj.status) } finally { if($r){$r.Close()}; if($w){$w.Close()}; if($s){$s.Close()}; if($c){$c.Close()} }" >nul 2>nul
+  "$ErrorActionPreference='Stop'; $h='%PHOST%'; $p=[int]%PPORT%; $c=$null; try { $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if(-not $iar.AsyncWaitHandle.WaitOne(2000)){ throw 'connect-timeout' }; $c.EndConnect($iar); exit 0 } finally { if($c){$c.Close()} }" >nul 2>nul
 if errorlevel 1 exit /b 1
 exit /b 0
 
@@ -399,6 +401,10 @@ exit /b 0
 set "WD_PID=%~1"
 set /a WD_FAILS=0
 set "WATCHDOG_STARTED_OK=0"
+set /a WD_LOG_STALE=0
+set "WD_LOG_PATH=%ROOT_DIR%\log\bridge_server.log"
+if /I "%OUTPUT_MODE%"=="file" set "WD_LOG_PATH=%LOG_PATH%"
+set "WD_LOG_LAST="
 
 :watchdog_tick
 call :is_pid_running "%WD_PID%"
@@ -412,26 +418,48 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if "%WATCHDOG_STARTED_OK%"=="1" goto watchdog_sleep
+
 call :probe_existing_server
 if errorlevel 1 (
   set /a WD_FAILS+=1
-  echo [WARN] Bridge ping failed ^(!WD_FAILS!/%WATCHDOG_MAX_FAILS%^)
+  echo [INFO] Waiting bridge ready ^(!WD_FAILS!/%WATCHDOG_MAX_FAILS%^)
   if !WD_FAILS! geq %WATCHDOG_MAX_FAILS% (
-    echo [ERROR] Bridge unresponsive for %WATCHDOG_MAX_FAILS% checks. Killing pid=%WD_PID%
+    echo [ERROR] Bridge unresponsive for %WATCHDOG_MAX_FAILS% checks during startup. Killing pid=%WD_PID%
     call :kill_pid "%WD_PID%"
     call :archive_file "%PORT_FILE%"
     call :print_bootstrap_hint
     exit /b 1
   )
 ) else (
-  if "%WATCHDOG_STARTED_OK%"=="0" (
-    echo [INFO] Bridge became responsive.
-    set "WATCHDOG_STARTED_OK=1"
-  )
+  echo [INFO] Bridge became responsive.
+  set "WATCHDOG_STARTED_OK=1"
+  call :get_file_mtime_epoch "%WD_LOG_PATH%" WD_LOG_LAST
+  if not defined WD_LOG_LAST set "WD_LOG_LAST=0"
   set /a WD_FAILS=0
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds %WATCHDOG_INTERVAL_SEC%" >nul 2>nul
+:watchdog_sleep
+if "%WATCHDOG_STARTED_OK%"=="1" (
+  call :get_file_mtime_epoch "%WD_LOG_PATH%" WD_LOG_NOW
+  if not defined WD_LOG_NOW set "WD_LOG_NOW=%WD_LOG_LAST%"
+  if "%WD_LOG_NOW%"=="%WD_LOG_LAST%" (
+    set /a WD_LOG_STALE+=1
+  ) else (
+    set /a WD_LOG_STALE=0
+    set "WD_LOG_LAST=%WD_LOG_NOW%"
+  )
+  if !WD_LOG_STALE! geq %WATCHDOG_IDLE_NOLOG_MAX% (
+    echo [INFO] No bridge log update for %WATCHDOG_IDLE_NOLOG_MAX% checks. Requesting shutdown...
+    call :request_quit
+    call :wait_pid_exit_or_kill "%WD_PID%" 10
+    call :archive_file "%PORT_FILE%"
+    exit /b 0
+  )
+  call :sleep_seconds "%WATCHDOG_RUNTIME_INTERVAL_SEC%"
+) else (
+  call :sleep_seconds "%WATCHDOG_INTERVAL_SEC%"
+)
 goto watchdog_tick
 
 :is_pid_running
@@ -446,6 +474,55 @@ set "KILL_PID_VALUE=%~1"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Stop-Process -Id %KILL_PID_VALUE% -Force -ErrorAction SilentlyContinue" >nul 2>nul
 exit /b 0
+
+:sleep_seconds
+set "SLEEP_SECONDS=%~1"
+if not defined SLEEP_SECONDS set "SLEEP_SECONDS=1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds %SLEEP_SECONDS%" >nul 2>nul
+exit /b 0
+
+:get_file_mtime_epoch
+set "MTIME_FILE=%~1"
+set "MTIME_OUTVAR=%~2"
+set "MTIME_VALUE="
+if exist "%MTIME_FILE%" (
+  for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%MTIME_FILE%'; if(Test-Path -LiteralPath $p){ [int64]([IO.File]::GetLastWriteTimeUtc($p) - [datetime]'1970-01-01').TotalSeconds }"`) do (
+    if not defined MTIME_VALUE set "MTIME_VALUE=%%I"
+  )
+)
+set "%MTIME_OUTVAR%=%MTIME_VALUE%"
+exit /b 0
+
+:request_quit
+if not exist "%PORT_FILE%" exit /b 0
+set "QHOST="
+set "QPORT="
+for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
+  set "QHOST=%%A"
+  set "QPORT=%%B"
+)
+if not defined QHOST exit /b 0
+if not defined QPORT exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; $h='%QHOST%'; $p=[int]%QPORT%; $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if($iar.AsyncWaitHandle.WaitOne(1500)){ $c.EndConnect($iar); $s=$c.GetStream(); $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $w.WriteLine('{""cmd"":""quit""}'); $w.Close(); $s.Close() }; $c.Close();" >nul 2>nul
+exit /b 0
+
+:wait_pid_exit_or_kill
+set "WAIT_PID=%~1"
+set "WAIT_MAX=%~2"
+if not defined WAIT_MAX set "WAIT_MAX=10"
+set /a WAIT_COUNT=0
+:wait_pid_loop
+call :is_pid_running "%WAIT_PID%"
+if errorlevel 1 exit /b 0
+call :sleep_seconds "1"
+set /a WAIT_COUNT+=1
+if !WAIT_COUNT! geq %WAIT_MAX% (
+  echo [WARN] Bridge did not exit after quit, forcing stop. pid=%WAIT_PID%
+  call :kill_pid "%WAIT_PID%"
+  exit /b 0
+)
+goto wait_pid_loop
 
 :print_bootstrap_hint
 if exist "%BOOTSTRAP_LOG_PATH%" (

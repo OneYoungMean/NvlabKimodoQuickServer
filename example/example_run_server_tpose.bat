@@ -145,7 +145,8 @@ if /I "%OUTPUT_MODE%"=="file" if exist "%CLIENT_LOG%" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$p='%CLIENT_LOG%'; $done=Get-Content -LiteralPath $p | Where-Object { $_ -match '\"status\": \"done\"' } | Select-Object -Last 1; if($done){ Write-Host '[TEST] done payload detected.' }"
 )
-call :try_kill_server_pid
+call :try_quit_if_running
+call :wait_server_exit_or_kill
 exit /b 0
 
 :decide_wait_timeout
@@ -233,6 +234,30 @@ if defined SPID (
 )
 call :archive_file "%SERVER_PID_FILE%"
 exit /b 0
+
+:wait_server_exit_or_kill
+if not exist "%SERVER_PID_FILE%" exit /b 0
+set "SPID="
+for /f "usebackq delims=" %%A in ("%SERVER_PID_FILE%") do (
+  if not defined SPID set "SPID=%%A"
+)
+if not defined SPID exit /b 0
+set /a EXIT_WAIT=0
+:wait_server_exit_loop
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$pidValue='%SPID%'; if($pidValue -notmatch '^\d+$'){ exit 0 }; $p=Get-Process -Id ([int]$pidValue) -ErrorAction SilentlyContinue; if($null -eq $p){ exit 0 } else { exit 1 }" >nul 2>nul
+if not errorlevel 1 (
+  call :archive_file "%SERVER_PID_FILE%"
+  exit /b 0
+)
+call :sleep_1s_or_cancel
+set /a EXIT_WAIT+=1
+if !EXIT_WAIT! geq 20 (
+  echo [WARN] Server did not exit after quit within 20s. Forcing stop.
+  call :try_kill_server_pid
+  exit /b 0
+)
+goto wait_server_exit_loop
 
 :stage_shared_models
 if not exist "%SHARED_MODELS_ROOT%" (
