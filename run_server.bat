@@ -103,7 +103,7 @@ if defined VENV_PATH_ARG (
   call :resolve_venv_python "%VENV_PATH_ARG%"
   if errorlevel 1 exit /b 1
   set "USING_EXTERNAL_VENV=1"
-  echo [INFO] Using external venv python: %VENV_PY%
+  echo [INFO] Using external venv python: !VENV_PY!
 )
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not defined MODELS_ROOT set "MODELS_ROOT=%ROOT_DIR%\models"
