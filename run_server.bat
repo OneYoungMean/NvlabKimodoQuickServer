@@ -28,6 +28,8 @@ set "VENV_PY="
 set "USING_EXTERNAL_MODELS=0"
 set "USING_EXTERNAL_VENV=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
+set "CONFIG_ONLY=%KIMODO_CONFIG_ONLY%"
+if not defined CONFIG_ONLY set "CONFIG_ONLY=0"
 set "WATCHDOG_INTERVAL_SEC=%KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC%"
 if not defined WATCHDOG_INTERVAL_SEC set "WATCHDOG_INTERVAL_SEC=1"
 set "WATCHDOG_MAX_FAILS=%KIMODO_WATCHDOG_STARTUP_MAX_FAILS%"
@@ -79,6 +81,11 @@ if /I "%~1"=="--venv" (
 )
 if /I "%~1"=="--force-setup" (
   call :archive_file "%SETUP_SENTINEL%"
+  shift
+  goto parse_args
+)
+if /I "%~1"=="--config-only" (
+  set "CONFIG_ONLY=1"
   shift
   goto parse_args
 )
@@ -148,19 +155,23 @@ if exist "%SERVER_STATE%" (
 )
 
 if exist "%PORT_FILE%" (
-  if /I not "%PREV_SIG%"=="%CUR_SIG%" (
-    echo [STEP] Existing server params differ, stopping previous server...
-    call :shutdown_existing
-    if errorlevel 1 exit /b 1
+  if /I "%CONFIG_ONLY%"=="1" (
+    echo [INFO] Config-only mode: skip existing server probe/shutdown.
   ) else (
-    call :probe_existing_server
-    if errorlevel 1 (
-      echo [WARN] Existing server signature matches, but probe failed. Restarting...
+    if /I not "%PREV_SIG%"=="%CUR_SIG%" (
+      echo [STEP] Existing server params differ, stopping previous server...
       call :shutdown_existing
       if errorlevel 1 exit /b 1
     ) else (
-      echo [INFO] Existing server already running with same params: %CUR_SIG%
-      exit /b 0
+      call :probe_existing_server
+      if errorlevel 1 (
+        echo [WARN] Existing server signature matches, but probe failed. Restarting...
+        call :shutdown_existing
+        if errorlevel 1 exit /b 1
+      ) else (
+        echo [INFO] Existing server already running with same params: %CUR_SIG%
+        exit /b 0
+      )
     )
   )
 )
@@ -239,6 +250,11 @@ if not exist "%HUGGINGFACE_HUB_CACHE%" mkdir "%HUGGINGFACE_HUB_CACHE%" >nul 2>nu
   echo sig=%CUR_SIG%
   echo model=%MODEL_RUN_NAME%
   echo highvram=%HIGHVRAM%
+)
+
+if /I "%CONFIG_ONLY%"=="1" (
+  echo [OK] Config-only completed. Bridge not started.
+  exit /b 0
 )
 
 set "KIMODO_IDLE_TIMEOUT_SEC=600"
