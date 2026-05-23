@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 """
 Kimodo Unity Bridge Server
 
@@ -26,6 +26,18 @@ def _default_bridge_log_path(root: str) -> str:
     if not root:
         return ""
     return os.path.join(root, "log", "bridge_server.log")
+
+
+def _write_text_atomic(path: str, content: str) -> None:
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    tmp_path = f"{path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
 
 
 def _out(obj):
@@ -280,8 +292,7 @@ def main():
     host, port = server.getsockname()
     kimodo_root = args.kimodo_root or os.environ.get("KIMODO_ROOT_PATH") or os.getcwd()
     port_file = os.path.join(kimodo_root, "serverport")
-    with open(port_file, "w", encoding="utf-8") as f:
-        f.write(f"{host}:{port}\n")
+    _write_text_atomic(port_file, f"{host}:{port}\n")
     os.environ["KIMODO_BRIDGE_LOG"] = _default_bridge_log_path(kimodo_root)
     _log(f"[bridge] listening host={host} port={port} model={args.model}")
 

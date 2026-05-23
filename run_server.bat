@@ -1,20 +1,36 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
+for /f %%I in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%~f0'; $b=[IO.File]::ReadAllBytes($p); if($b.Length -ge 3 -and $b[0]-eq 239 -and $b[1]-eq 187 -and $b[2]-eq 191){'1'} else {'0'}"') do set "__HAS_BOM=%%I"
+if "%__HAS_BOM%"=="1" (
+  echo [ERROR] run_server.bat contains UTF-8 BOM. Save as UTF-8 without BOM.
+  exit /b 1
+)
 
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%"
 set "LOG_DIR=%ROOT_DIR%\log"
+set "LOG_NAME_RUN_SERVER=run_server.log"
+set "LOG_NAME_BRIDGE_SERVER=bridge_server.log"
+set "LOG_NAME_BRIDGE_MESSAGE=bridge_message.log"
+set "LOG_NAME_SETUP=setup.log"
+set "LOG_NAME_DOWNLOAD=download_model.log"
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
 set "OUTPUT_MODE=console"
-set "LOG_PATH=%LOG_DIR%\run_server.log"
-set "BOOTSTRAP_LOG_PATH=%LOG_DIR%\bridge_server.log"
-set "BRIDGE_MESSAGE_LOG_PATH=%LOG_DIR%\bridge_message.log"
+set "LOG_PATH=%LOG_DIR%\%LOG_NAME_RUN_SERVER%"
+set "BOOTSTRAP_LOG_PATH=%LOG_DIR%\%LOG_NAME_BRIDGE_SERVER%"
+set "BRIDGE_MESSAGE_LOG_PATH=%LOG_DIR%\%LOG_NAME_BRIDGE_MESSAGE%"
 set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
 set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
 set "RESOLVE_MODEL_ALIAS_BAT=%ROOT_DIR%\bash\resolve_model_alias.bat"
+set "LAUNCH_BRIDGE_PS1=%ROOT_DIR%\bash\launch_bridge.ps1"
+set "RUN_SETUP_PHASE_BAT=%ROOT_DIR%\bash\run_setup_phase.bat"
+set "RUN_DOWNLOAD_PHASE_BAT=%ROOT_DIR%\bash\run_download_phase.bat"
+set "WATCHDOG_BRIDGE_BAT=%ROOT_DIR%\bash\watchdog_bridge.bat"
+set "COMMON_ENV_BAT=%ROOT_DIR%\bash\common_env.bat"
+set "BRIDGE_PROBE_PS1=%ROOT_DIR%\bash\bridge_probe.ps1"
 set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
 set "SETUP_SENTINEL=%ROOT_DIR%\.setup.complete"
 set "PORT_FILE=%ROOT_DIR%\serverport"
@@ -83,7 +99,7 @@ if /I "%~1"=="--venv" (
   goto parse_args
 )
 if /I "%~1"=="--force-setup" (
-  call :archive_file "%SETUP_SENTINEL%"
+  call "%COMMON_ENV_BAT%" :archive_file "%SETUP_SENTINEL%" "%RECYCLE_DIR%"
   shift
   goto parse_args
 )
@@ -103,7 +119,7 @@ if not defined SOURCE_ROOT (
   exit /b 1
 )
 if defined VENV_PATH_ARG (
-  call :resolve_venv_python "%VENV_PATH_ARG%"
+  call "%COMMON_ENV_BAT%" :resolve_venv_python "%VENV_PATH_ARG%"
   if errorlevel 1 exit /b 1
   set "USING_EXTERNAL_VENV=1"
   echo [INFO] Using external venv python: !VENV_PY!
@@ -125,6 +141,30 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
 
 if not exist "%RESOLVE_MODEL_ALIAS_BAT%" (
   echo [ERROR] Missing model alias resolver: %RESOLVE_MODEL_ALIAS_BAT%
+  exit /b 1
+)
+if not exist "%LAUNCH_BRIDGE_PS1%" (
+  echo [ERROR] Missing bridge launcher script: %LAUNCH_BRIDGE_PS1%
+  exit /b 1
+)
+if not exist "%RUN_SETUP_PHASE_BAT%" (
+  echo [ERROR] Missing setup phase script: %RUN_SETUP_PHASE_BAT%
+  exit /b 1
+)
+if not exist "%RUN_DOWNLOAD_PHASE_BAT%" (
+  echo [ERROR] Missing download phase script: %RUN_DOWNLOAD_PHASE_BAT%
+  exit /b 1
+)
+if not exist "%WATCHDOG_BRIDGE_BAT%" (
+  echo [ERROR] Missing watchdog script: %WATCHDOG_BRIDGE_BAT%
+  exit /b 1
+)
+if not exist "%COMMON_ENV_BAT%" (
+  echo [ERROR] Missing common env script: %COMMON_ENV_BAT%
+  exit /b 1
+)
+if not exist "%BRIDGE_PROBE_PS1%" (
+  echo [ERROR] Missing bridge probe script: %BRIDGE_PROBE_PS1%
   exit /b 1
 )
 call "%RESOLVE_MODEL_ALIAS_BAT%" "%MODEL_NAME%"
@@ -179,27 +219,11 @@ if exist "%PORT_FILE%" (
   )
 )
 
-if "%USING_EXTERNAL_VENV%"=="1" (
-  echo [STEP] External venv mode enabled, skip setup.
-) else (
-  if not exist "%SETUP_SENTINEL%" (
-    echo [STEP] setup not found, running setup...
-    call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%LOG_DIR%\setup.log"
-    if errorlevel 1 exit /b 1
-  )
-)
+call "%RUN_SETUP_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_VENV%" "%SETUP_SENTINEL%" "%SETUP_BAT%" "%LOG_DIR%\%LOG_NAME_SETUP%"
+if errorlevel 1 exit /b 1
 
-if "%USING_EXTERNAL_MODELS%"=="1" (
-  echo [STEP] External models mode enabled, skip download_model.
-) else (
-  echo [STEP] Downloading model assets for model=%MODEL_NAME% highvram=%HIGHVRAM%...
-  if "%HIGHVRAM%"=="1" (
-    call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
-  ) else (
-    call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%"
-  )
-  if errorlevel 1 exit /b 1
-)
+call "%RUN_DOWNLOAD_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_MODELS%" "%HIGHVRAM%" "%MODEL_RUN_NAME%" "%MODEL_NAME%" "%DOWNLOAD_BAT%" "%LOG_DIR%\%LOG_NAME_DOWNLOAD%"
+if errorlevel 1 exit /b 1
 
 if not defined VENV_PY set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
@@ -261,7 +285,7 @@ if /I "%CONFIG_ONLY%"=="1" (
 )
 
 set "KIMODO_IDLE_TIMEOUT_SEC=600"
-if exist "%BRIDGE_PID_FILE%" call :archive_file "%BRIDGE_PID_FILE%"
+if exist "%BRIDGE_PID_FILE%" call "%COMMON_ENV_BAT%" :archive_file "%BRIDGE_PID_FILE%" "%RECYCLE_DIR%"
 
 if /I "%OUTPUT_MODE%"=="file" (
   set "LOG_USED=%LOG_PATH%"
@@ -269,16 +293,21 @@ if /I "%OUTPUT_MODE%"=="file" (
   echo [INFO] bridge server log: %BOOTSTRAP_LOG_PATH%
   echo [INFO] bridge message log: %BRIDGE_MESSAGE_LOG_PATH%
   type nul > "!LOG_USED!"
-  if exist "%BOOTSTRAP_LOG_PATH%" call :archive_file "%BOOTSTRAP_LOG_PATH%"
+  if exist "%BOOTSTRAP_LOG_PATH%" call "%COMMON_ENV_BAT%" :archive_file "%BOOTSTRAP_LOG_PATH%" "%RECYCLE_DIR%"
   type nul > "%BOOTSTRAP_LOG_PATH%"
-  if exist "%BRIDGE_MESSAGE_LOG_PATH%" call :archive_file "%BRIDGE_MESSAGE_LOG_PATH%"
+  if exist "%BRIDGE_MESSAGE_LOG_PATH%" call "%COMMON_ENV_BAT%" :archive_file "%BRIDGE_MESSAGE_LOG_PATH%" "%RECYCLE_DIR%"
   type nul > "%BRIDGE_MESSAGE_LOG_PATH%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='%BOOTSTRAP_LOG_PATH%'; $ws='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($ws)){ $ws='Hidden' }; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle $ws -RedirectStandardOutput '%BOOTSTRAP_LOG_PATH%' -RedirectStandardError '%BRIDGE_MESSAGE_LOG_PATH%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
-) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='%BOOTSTRAP_LOG_PATH%'; $ws='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($ws)){ $ws='Hidden' }; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle $ws -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
 )
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LAUNCH_BRIDGE_PS1%" ^
+  -PythonPath "%VENV_PY%" ^
+  -RootDir "%ROOT_DIR%" ^
+  -ModelName "%MODEL_RUN_NAME%" ^
+  -WindowStyle "%SERVER_WINDOW_STYLE%" ^
+  -BridgeLogPath "%BOOTSTRAP_LOG_PATH%" ^
+  -BridgeMessageLogPath "%BRIDGE_MESSAGE_LOG_PATH%" ^
+  -PidFile "%BRIDGE_PID_FILE%" ^
+  -OutputMode "%OUTPUT_MODE%"
 if errorlevel 1 (
   echo [ERROR] Failed to start bridge server process.
   exit /b 1
@@ -292,34 +321,14 @@ if not defined SERVER_PID (
   echo [ERROR] Missing bridge PID in %BRIDGE_PID_FILE%
   exit /b 1
 )
-echo [INFO] Bridge watchdog started. pid=%SERVER_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% connect_timeout=%WATCHDOG_CONNECT_TIMEOUT_MS%ms runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
-call :watchdog_loop "%SERVER_PID%"
+call "%WATCHDOG_BRIDGE_BAT%" "%ROOT_DIR%" "%SERVER_PID%" "%PORT_FILE%" "%BOOTSTRAP_LOG_PATH%" "%WATCHDOG_INTERVAL_SEC%" "%WATCHDOG_MAX_FAILS%" "%WATCHDOG_CONNECT_TIMEOUT_MS%" "%WATCHDOG_RUNTIME_INTERVAL_SEC%" "%WATCHDOG_IDLE_NOLOG_MAX%"
 set "RC=%ERRORLEVEL%"
-call :archive_file "%BRIDGE_PID_FILE%"
+call "%COMMON_ENV_BAT%" :archive_file "%BRIDGE_PID_FILE%" "%RECYCLE_DIR%"
 exit /b %RC%
 
 :validate_safetensors_or_repair
-set "MODEL_VALIDATE_NEEDS_REPAIR=0"
-call :validate_safetensor "main-model" "%MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors"
+call :validate_all_safetensors
 if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
-
-if "%HIGHVRAM%"=="1" (
-  if exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors" (
-    call :validate_safetensor "meta-llama" "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors"
-    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
-  )
-  if exist "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors" (
-    call :validate_safetensor "llm2vec-peft" "%KIMODO_LLM2VEC_PEFT_DIR%\adapter_model.safetensors"
-    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
-  )
-  if exist "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors" (
-    call :validate_safetensor "llm2vec-peft-model" "%KIMODO_LLM2VEC_PEFT_DIR%\model.safetensors"
-    if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
-  )
-) else (
-  call :validate_safetensor "llm2vec-nf4" "%KIMODO_LLM2VEC_DIR%\model.safetensors"
-  if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
-)
 
 if "%MODEL_VALIDATE_NEEDS_REPAIR%"=="0" exit /b 0
 echo [WARN] Detected corrupted safetensors file(s). Attempting one-time model re-sync...
@@ -328,18 +337,30 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
   exit /b 1
 )
 if "%HIGHVRAM%"=="1" (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\%LOG_NAME_DOWNLOAD%" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
 ) else (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\download_model.log" --unlock-stale --model "%MODEL_RUN_NAME%"
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%LOG_DIR%\%LOG_NAME_DOWNLOAD%" --unlock-stale --model "%MODEL_RUN_NAME%"
 )
 if errorlevel 1 (
   echo [ERROR] download_model failed during auto-repair.
   exit /b 1
 )
 
+call :validate_all_safetensors
+if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+
+if "%MODEL_VALIDATE_NEEDS_REPAIR%"=="1" (
+  echo [ERROR] safetensors validation still failed after auto-repair.
+  exit /b 1
+)
+echo [OK] safetensors auto-repair completed.
+exit /b 0
+
+:validate_all_safetensors
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
 call :validate_safetensor "main-model" "%MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors"
 if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
+
 if "%HIGHVRAM%"=="1" (
   if exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors" (
     call :validate_safetensor "meta-llama" "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors"
@@ -358,11 +379,7 @@ if "%HIGHVRAM%"=="1" (
   if errorlevel 1 set "MODEL_VALIDATE_NEEDS_REPAIR=1"
 )
 
-if "%MODEL_VALIDATE_NEEDS_REPAIR%"=="1" (
-  echo [ERROR] safetensors validation still failed after auto-repair.
-  exit /b 1
-)
-echo [OK] safetensors auto-repair completed.
+if "%MODEL_VALIDATE_NEEDS_REPAIR%"=="1" exit /b 1
 exit /b 0
 
 :validate_safetensor
@@ -376,7 +393,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $f='%VALIDATE_TARGET_FILE%'; Add-Type -AssemblyName System.IO.Compression.FileSystem; $fs=[IO.File]::Open($f,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { $buf=New-Object byte[] 8; $read=$fs.Read($buf,0,8); if($read -lt 8){ throw 'short-header' }; $len=[BitConverter]::ToUInt64($buf,0); if($len -le 0 -or $len -gt 104857600){ throw ('invalid-header-length:' + $len) } } finally { $fs.Close() }" >nul 2>nul
 if errorlevel 1 (
   echo [WARN] Corrupted safetensor detected ^(%VALIDATE_TARGET_LABEL%^): %VALIDATE_TARGET_FILE%
-  call :archive_file "%VALIDATE_TARGET_FILE%"
+  call "%COMMON_ENV_BAT%" :archive_file "%VALIDATE_TARGET_FILE%" "%RECYCLE_DIR%"
   exit /b 1
 )
 exit /b 0
@@ -388,18 +405,33 @@ for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
   set "HOST=%%A"
   set "PORT=%%B"
 )
-if not defined HOST (
-  echo [WARN] serverport exists but unreadable, continue with restart.
-  exit /b 0
+echo [STEP] Killing previous server process...
+set "KILL_PID="
+if exist "%BRIDGE_PID_FILE%" (
+  for /f "usebackq tokens=* delims=" %%I in ("%BRIDGE_PID_FILE%") do (
+    if not defined KILL_PID set "KILL_PID=%%I"
+  )
 )
-if not defined PORT (
-  echo [WARN] serverport exists but missing port, continue with restart.
-  exit /b 0
+if defined KILL_PID (
+  call "%COMMON_ENV_BAT%" :kill_pid_if_kimodo_bridge "%KILL_PID%"
+  if errorlevel 1 (
+    echo [WARN] Ignore stale/non-kimodo bridge pid from .bridge.pid: %KILL_PID%
+    set "KILL_PID="
+  )
 )
-
-echo [STEP] Sending quit to !HOST!:!PORT! ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $h='%HOST%'; $p=[int]%PORT%; $c=New-Object Net.Sockets.TcpClient($h,$p); $s=$c.GetStream(); $w=New-Object IO.StreamWriter($s); $r=New-Object IO.StreamReader($s); $w.AutoFlush=$true; $w.WriteLine('{""cmd"":""quit""}'); $null=$r.ReadLine(); $r.Close(); $w.Close(); $s.Close(); $c.Close();" >nul 2>nul
+if not defined KILL_PID if defined PORT (
+  for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $p=[int]%PORT%; $c=Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if($c){ $c }"`) do (
+    if not defined KILL_PID set "KILL_PID=%%I"
+  )
+  if defined KILL_PID (
+    call "%COMMON_ENV_BAT%" :kill_pid_if_kimodo_bridge "%KILL_PID%"
+    if errorlevel 1 (
+      echo [WARN] Port owner is not kimodo bridge, skip force-kill. pid=%KILL_PID% port=%PORT%
+      set "KILL_PID="
+    )
+  )
+)
+if exist "%BRIDGE_PID_FILE%" call "%COMMON_ENV_BAT%" :archive_file "%BRIDGE_PID_FILE%" "%RECYCLE_DIR%"
 
 set /a WAIT_SEC=0
 :wait_old_exit
@@ -409,7 +441,7 @@ set /a WAIT_SEC+=1
 if !WAIT_SEC! geq 30 (
   echo [WARN] Timeout waiting previous server to stop.
   echo [WARN] Archiving stale serverport and continuing restart.
-  call :archive_file "%PORT_FILE%"
+  call "%COMMON_ENV_BAT%" :archive_file "%PORT_FILE%" "%RECYCLE_DIR%"
   exit /b 0
 )
 goto wait_old_exit
@@ -424,182 +456,9 @@ for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
 if not defined PHOST exit /b 1
 if not defined PPORT exit /b 1
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $h='%PHOST%'; $p=[int]%PPORT%; $to=[int]%WATCHDOG_CONNECT_TIMEOUT_MS%; $c=$null; try { $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if(-not $iar.AsyncWaitHandle.WaitOne($to)){ throw 'connect-timeout' }; $c.EndConnect($iar); exit 0 } finally { if($c){$c.Close()} }" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BRIDGE_PROBE_PS1%" -Host "%PHOST%" -Port %PPORT% -ConnectTimeoutMs %WATCHDOG_CONNECT_TIMEOUT_MS% >nul 2>nul
 if errorlevel 1 exit /b 1
 exit /b 0
 
-:watchdog_loop
-set "WD_PID=%~1"
-set /a WD_FAILS=0
-set "WATCHDOG_STARTED_OK=0"
-set /a WD_LOG_STALE=0
-set "WD_LOG_PATH=%ROOT_DIR%\log\bridge_message.log"
-set "WD_LOG_LAST="
-
-:watchdog_tick
-call :is_pid_running "%WD_PID%"
-if errorlevel 1 (
-  if "%WATCHDOG_STARTED_OK%"=="1" (
-    echo [INFO] Bridge process exited. pid=%WD_PID%
-    exit /b 0
-  )
-  echo [ERROR] Bridge process exited before becoming responsive. pid=%WD_PID%
-  call :print_bootstrap_hint
-  exit /b 1
-)
-
-if "%WATCHDOG_STARTED_OK%"=="1" goto watchdog_sleep
-
-call :probe_existing_server
-if errorlevel 1 (
-  set /a WD_FAILS+=1
-  echo [INFO] Waiting bridge ready ^(!WD_FAILS!/%WATCHDOG_MAX_FAILS%^)
-  if !WD_FAILS! geq %WATCHDOG_MAX_FAILS% (
-    echo [ERROR] Bridge unresponsive for %WATCHDOG_MAX_FAILS% checks during startup. Killing pid=%WD_PID%
-    call :kill_pid "%WD_PID%"
-    call :archive_file "%PORT_FILE%"
-    call :print_bootstrap_hint
-    exit /b 1
-  )
-) else (
-  echo [INFO] Bridge became responsive.
-  set "WATCHDOG_STARTED_OK=1"
-  call :get_file_mtime_epoch "%WD_LOG_PATH%" WD_LOG_LAST
-  if not defined WD_LOG_LAST set "WD_LOG_LAST=0"
-  set /a WD_FAILS=0
-)
-
-:watchdog_sleep
-if "%WATCHDOG_STARTED_OK%"=="1" (
-  call :get_file_mtime_epoch "%WD_LOG_PATH%" WD_LOG_NOW
-  if not defined WD_LOG_NOW set "WD_LOG_NOW=%WD_LOG_LAST%"
-  if "%WD_LOG_NOW%"=="%WD_LOG_LAST%" (
-    set /a WD_LOG_STALE+=1
-  ) else (
-    set /a WD_LOG_STALE=0
-    set "WD_LOG_LAST=%WD_LOG_NOW%"
-  )
-  if !WD_LOG_STALE! geq %WATCHDOG_IDLE_NOLOG_MAX% (
-    echo [INFO] No bridge log update for %WATCHDOG_IDLE_NOLOG_MAX% checks. Requesting shutdown...
-    call :request_quit
-    call :wait_pid_exit_or_kill "%WD_PID%" 10
-    call :archive_file "%PORT_FILE%"
-    exit /b 0
-  )
-  call :sleep_seconds "%WATCHDOG_RUNTIME_INTERVAL_SEC%"
-) else (
-  call :sleep_seconds "%WATCHDOG_INTERVAL_SEC%"
-)
-goto watchdog_tick
-
-:is_pid_running
-set "CHECK_PID=%~1"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$p=Get-Process -Id %CHECK_PID% -ErrorAction SilentlyContinue; if($p){ exit 0 } else { exit 1 }" >nul 2>nul
-if errorlevel 1 exit /b 1
-exit /b 0
-
-:kill_pid
-set "KILL_PID_VALUE=%~1"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "Stop-Process -Id %KILL_PID_VALUE% -Force -ErrorAction SilentlyContinue" >nul 2>nul
-exit /b 0
-
-:sleep_seconds
-set "SLEEP_SECONDS=%~1"
-if not defined SLEEP_SECONDS set "SLEEP_SECONDS=1"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds %SLEEP_SECONDS%" >nul 2>nul
-exit /b 0
-
-:get_file_mtime_epoch
-set "MTIME_FILE=%~1"
-set "MTIME_OUTVAR=%~2"
-set "MTIME_VALUE="
-if exist "%MTIME_FILE%" (
-  for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%MTIME_FILE%'; if(Test-Path -LiteralPath $p){ [int64]([IO.File]::GetLastWriteTimeUtc($p) - [datetime]'1970-01-01').TotalSeconds }"`) do (
-    if not defined MTIME_VALUE set "MTIME_VALUE=%%I"
-  )
-)
-set "%MTIME_OUTVAR%=%MTIME_VALUE%"
-exit /b 0
-
-:request_quit
-if not exist "%PORT_FILE%" exit /b 0
-set "QHOST="
-set "QPORT="
-for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
-  set "QHOST=%%A"
-  set "QPORT=%%B"
-)
-if not defined QHOST exit /b 0
-if not defined QPORT exit /b 0
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='SilentlyContinue'; $h='%QHOST%'; $p=[int]%QPORT%; $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if($iar.AsyncWaitHandle.WaitOne(1500)){ $c.EndConnect($iar); $s=$c.GetStream(); $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $w.WriteLine('{""cmd"":""quit""}'); $w.Close(); $s.Close() }; $c.Close();" >nul 2>nul
-exit /b 0
-
-:wait_pid_exit_or_kill
-set "WAIT_PID=%~1"
-set "WAIT_MAX=%~2"
-if not defined WAIT_MAX set "WAIT_MAX=10"
-set /a WAIT_COUNT=0
-:wait_pid_loop
-call :is_pid_running "%WAIT_PID%"
-if errorlevel 1 exit /b 0
-call :sleep_seconds "1"
-set /a WAIT_COUNT+=1
-if !WAIT_COUNT! geq %WAIT_MAX% (
-  echo [WARN] Bridge did not exit after quit, forcing stop. pid=%WAIT_PID%
-  call :kill_pid "%WAIT_PID%"
-  exit /b 0
-)
-goto wait_pid_loop
-
-:print_bootstrap_hint
-if exist "%BOOTSTRAP_LOG_PATH%" (
-  for %%I in ("%BOOTSTRAP_LOG_PATH%") do (
-    if %%~zI gtr 0 (
-      echo [ERROR] bridge details: %BOOTSTRAP_LOG_PATH%
-    ) else (
-      echo [WARN] bridge log is empty: %BOOTSTRAP_LOG_PATH%
-    )
-  )
-) else (
-  echo [WARN] bridge log missing: %BOOTSTRAP_LOG_PATH%
-)
-exit /b 0
-
-:resolve_venv_python
-set "VENV_INPUT=%~1"
-if not defined VENV_INPUT (
-  echo [ERROR] --venv requires a path.
-  exit /b 1
-)
-for %%I in ("%VENV_INPUT%") do set "VENV_INPUT_ABS=%%~fI"
-set "VENV_CAND=%VENV_INPUT_ABS%"
-if /I "%VENV_CAND:~-10%"=="python.exe" goto venv_resolved
-if /I "%VENV_CAND:~-8%"=="\Scripts" (
-  set "VENV_CAND=%VENV_CAND%\python.exe"
-) else (
-  set "VENV_CAND=%VENV_CAND%\Scripts\python.exe"
-)
-:venv_resolved
-if not exist "%VENV_CAND%" (
-  echo [ERROR] Invalid --venv path, python not found: %VENV_CAND%
-  exit /b 1
-)
-for %%I in ("%VENV_CAND%") do set "VENV_PY=%%~fI"
-exit /b 0
-
-:archive_file
-set "ARCHIVE_TARGET=%~1"
-if not exist "%ARCHIVE_TARGET%" exit /b 0
-if not exist "%RECYCLE_DIR%" mkdir "%RECYCLE_DIR%" >nul 2>nul
-set "TS=%DATE:~0,4%%DATE:~5,2%%DATE:~8,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
-set "TS=%TS: =0%"
-set "BASE=%~nx1"
-set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
-move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
-exit /b 0
 
 
