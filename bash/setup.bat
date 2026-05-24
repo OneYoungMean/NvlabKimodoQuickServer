@@ -8,6 +8,8 @@ set "LOG_DIR=%ROOT_DIR%\log"
 set "SOURCE_ROOT="
 set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\setup.log"
+set "SETUP_DEVICE=%KIMODO_SETUP_DEVICE%"
+if not defined SETUP_DEVICE set "SETUP_DEVICE=cuda"
 set "LOCK_FILE=%ROOT_DIR%\.setup.lock"
 set "SENTINEL=%ROOT_DIR%\.setup.complete"
 set "SETUP_BUILD_IMPL=%ROOT_DIR%\bash\setup_buildenv_impl.bat"
@@ -32,10 +34,21 @@ if /I "%~1"=="--force" (
   shift
   goto parse_args
 )
+if /I "%~1"=="--device" (
+  set "SETUP_DEVICE=%~2"
+  shift
+  shift
+  goto parse_args
+)
 shift
 goto parse_args
 
 :parsed
+if /I not "%SETUP_DEVICE%"=="cuda" if /I not "%SETUP_DEVICE%"=="cpu" (
+  echo [ERROR] Invalid --device value: %SETUP_DEVICE%
+  echo [ERROR] Allowed values: cuda ^| cpu
+  exit /b 1
+)
 if exist "%ROOT_DIR%\pyproject.toml" set "SOURCE_ROOT=%ROOT_DIR%"
 if not defined SOURCE_ROOT if exist "%ROOT_DIR%\kimodo\pyproject.toml" set "SOURCE_ROOT=%ROOT_DIR%\kimodo"
 if not defined SOURCE_ROOT (
@@ -50,8 +63,16 @@ if exist "%LOCK_FILE%" (
 )
 
 if exist "%SENTINEL%" (
-  echo [INFO] setup already completed: %SENTINEL%
-  exit /b 0
+  set "SENTINEL_DEVICE="
+  for /f "usebackq tokens=1,* delims==" %%A in ("%SENTINEL%") do (
+    if /I "%%A"=="setup_device" set "SENTINEL_DEVICE=%%B"
+  )
+  if /I "!SENTINEL_DEVICE!"=="%SETUP_DEVICE%" (
+    echo [INFO] setup already completed: %SENTINEL%
+    exit /b 0
+  )
+  echo [INFO] setup sentinel device mismatch ^(found=!SENTINEL_DEVICE!, want=%SETUP_DEVICE%^), re-running setup.
+  call :archive_file "%SENTINEL%"
 )
 
 > "%LOCK_FILE%" (
@@ -74,12 +95,14 @@ exit /b %RC%
 
 :main
 echo [STEP] Build env (single-thread)...
+echo [INFO] setup device mode: %SETUP_DEVICE%
 if not exist "%SETUP_BUILD_IMPL%" (
   echo [ERROR] Missing build impl: %SETUP_BUILD_IMPL%
   exit /b 1
 )
 set "KIMODO_BUILDENV_ONLY=1"
 set "KIMODO_SETUP_BG=1"
+set "KIMODO_SETUP_DEVICE=%SETUP_DEVICE%"
 pushd "%ROOT_DIR%" >nul
 call "%SETUP_BUILD_IMPL%"
 set "BUILD_RC=%ERRORLEVEL%"
@@ -87,6 +110,7 @@ popd >nul
 if not "%BUILD_RC%"=="0" exit /b %BUILD_RC%
 set "KIMODO_BUILDENV_ONLY="
 set "KIMODO_SETUP_BG="
+set "KIMODO_SETUP_DEVICE="
 
 set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (
@@ -102,6 +126,7 @@ if errorlevel 1 (
 
 > "%SENTINEL%" (
   echo setup_time=%DATE% %TIME%
+  echo setup_device=%SETUP_DEVICE%
   echo root_dir=%ROOT_DIR%
   echo source_root=%SOURCE_ROOT%
 )

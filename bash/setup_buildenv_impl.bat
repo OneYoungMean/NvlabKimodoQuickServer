@@ -62,6 +62,8 @@ set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=%KIMODO_NETWORK_FALLBACK_HEAD_TIMEOUT_SEC
 if not defined NETWORK_FALLBACK_HEAD_TIMEOUT_SEC set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=3"
 set "PYTHON_SPEC="
 set "INJECT_ONCE=0"
+set "SETUP_DEVICE=%KIMODO_SETUP_DEVICE%"
+if not defined SETUP_DEVICE set "SETUP_DEVICE=cuda"
 
 if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
 
@@ -191,30 +193,38 @@ if errorlevel 1 (
   echo [INFO] torchruntime already present, skip reinstall.
 )
 
-echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
-"%VENV_PY%" -m torchruntime install torch torchvision torchaudio
-if errorlevel 1 (
-  echo [ERROR] torchruntime failed to install CUDA-enabled torch packages.
-  exit /b 1
-)
-
-echo [STEP] Validating CUDA-only torch runtime...
-"%VENV_PY%" -c "import torch,sys; ok=torch.cuda.is_available(); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if ok else 1)"
-if errorlevel 1 (
-  echo [ERROR] CUDA is required by Kimodo, but current torch runtime is CPU-only or CUDA unavailable.
-  echo [ERROR] Please install NVIDIA CUDA driver/runtime and ensure CUDA-enabled torch is installed in this venv.
-  exit /b 1
-)
-echo [STEP] Ensuring bitsandbytes for 4-bit quantization...
-"%VENV_PY%" -c "import bitsandbytes as bnb; print(getattr(bnb, '__version__', 'unknown'))" >nul 2>nul
-if errorlevel 1 (
-  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes>=0.46.1"
+if /I "%SETUP_DEVICE%"=="cpu" (
+  echo [STEP] Installing CPU-only torch runtime via uv...
+  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "torch>=2.5" "torchvision>=0.20" "torchaudio>=2.5"
   if errorlevel 1 (
-    echo [ERROR] Failed to install bitsandbytes.
+    echo [ERROR] Failed to install CPU torch packages.
     exit /b 1
   )
+  echo [STEP] Validating CPU torch runtime...
+  "%VENV_PY%" -c "import torch,sys; print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if not torch.cuda.is_available() else 0)"
+  if errorlevel 1 (
+    echo [ERROR] CPU torch runtime validation failed.
+    exit /b 1
+  )
+  echo [INFO] CPU mode selected, skip bitsandbytes install.
 ) else (
-  echo [INFO] bitsandbytes already present, skip reinstall.
+  echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
+  "%VENV_PY%" -m torchruntime install torch torchvision torchaudio
+  if errorlevel 1 (
+    echo [ERROR] torchruntime failed to install CUDA-enabled torch packages.
+    exit /b 1
+  )
+  echo [STEP] Ensuring bitsandbytes for 4-bit quantization...
+  "%VENV_PY%" -c "import bitsandbytes as bnb; print(getattr(bnb, '__version__', 'unknown'))" >nul 2>nul
+  if errorlevel 1 (
+    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes>=0.46.1"
+    if errorlevel 1 (
+      echo [ERROR] Failed to install bitsandbytes.
+      exit /b 1
+    )
+  ) else (
+    echo [INFO] bitsandbytes already present, skip reinstall.
+  )
 )
 
 echo [STEP] Ensuring motion_correction...
