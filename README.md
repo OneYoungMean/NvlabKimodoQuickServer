@@ -1,186 +1,43 @@
-﻿# NvlabKimodoQuickServer
+# NvlabKimodoQuickServer
 
-This directory is a clean bridge runtime pipeline for Kimodo.
+## Language
+- Chinese: `README_ZH.md`
+- English: `README.md`
 
-Target readers:
-- AI agents integrating or operating the runtime automatically
-- Developers replacing old `setup_kimodo_offline/start_kimodo_bridge_offline` flow
+## Features
+- Build runtime environment with `uv` pipeline.
+- Start Kimodo bridge server with model options.
+- Run TCP example flow (`ping -> generate -> quit`).
 
-Core goals:
-- deterministic setup/start/test
-- single-thread script behavior
-- model download decoupled from environment setup
-- safer repeated start and restart logic
+## Requirements
+- Windows 10/11 x64
+- Local tools under `program\exe\`:
+  - `uv\uv.exe`
+  - `git\cmd\git.exe`
+  - `git\mingw32\bin\git-lfs.exe`
+- Model root available (recommended): `C:\nvlab\models~`
 
-## What It Does
-
-- Provision and validate runtime env (`bash\setup.bat`).
-- Download/update model assets (`bash\download_model.bat`).
-- Start Kimodo bridge server with model/VRAM options (`run_server.bat`).
-- Perform TCP smoke test (`example\example_run_server_tpose.bat`).
-
-## New vs Legacy (Table)
-
-| Aspect | New Pipeline (`setup/download_model/run_server`) | Legacy Pipeline (`setup_kimodo_offline/start_kimodo_bridge_offline`, now in `obstacle\`) |
-|---|---|---|
-| Setup responsibility | Env only | Env + model checks/download coupled together |
-| Model download timing | Explicit `download_model.bat`, and integrated into run/start | Usually happens in setup chain |
-| Repeated start behavior | Detects previous signature; same params reuse, different params quit+restart | No equivalent robust signature-based restart flow |
-| High VRAM option | `--highvram` explicit | Mainly auto-detect by local files in old flow |
-| Git bootstrap | Auto local portable `git/git-lfs` on Windows if missing | Assumes git/lfs already available |
-| Test entry | `example\example_run_server_tpose.bat` (new run_server path) | legacy tpose tests in archived scripts |
-| Script style | New minimal single-thread path | Legacy compatibility path |
-
-## Quick Start
-
-Run from `C:\nvlab\NvlabKimodoQuickServer`:
-
+## Install
 ```bat
+cd /d C:\nvlab\NvlabKimodoQuickServer
 bash\setup.bat --output console
-run_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
 
-Smoke test:
+## Example
+```bat
+cd /d C:\nvlab\NvlabKimodoQuickServer
+run_server.bat --model Kimodo-SOMA-RP-v1 --models-root C:\nvlab\models~ --output console
+```
 
+TCP smoke test:
 ```bat
 example\example_run_server_tpose.bat
 ```
 
-## Entry Scripts
-
-- `bash\setup.bat`
-- `bash\download_model.bat`
-- `run_server.bat`
-- `example\example_run_server_tpose.bat`
-- `bash\resolve_model_alias.bat`
-
-## Protocol Supported by Server
-
-Bridge server module:
-- `kimodo.bridge.bridge_server`
-
-Transport:
-- TCP
-- newline-delimited JSON request/response
-
-Commands:
-
-1. `ping`
-```json
-{"cmd":"ping"}
+Live console variant:
+```bat
+example\example_run_server_tpose_console_live.bat
 ```
-Returns: `pong` or `loading` or `error`.
 
-2. `generate`
-```json
-{
-  "cmd":"generate",
-  "prompt":"tpose",
-  "duration":5.0,
-  "seed":42,
-  "diffusion_steps":100,
-  "constraints_json":""
-}
-```
-Returns `done` with `motion_json_compact` on success.
-
-3. `quit`
-```json
-{"cmd":"quit"}
-```
-Returns `bye`.
-
-Common statuses:
-- `initializing`
-- `loading`
-- `ready`
-- `progress`
-- `pong`
-- `done`
-- `bye`
-- `error`
-
-## Parameters and Model Switching
-
-### `bash\setup.bat`
-- `--output console|file`
-- `--log <path>`
-- `--force`
-
-### `bash\download_model.bat`
-- `--model <name>`
-- `--highvram`
-- `--unlock-stale`
-- `--force`
-- `--output console|file`
-- `--log <path>`
-
-### `run_server.bat`
-- `--model <name>`
-- `--highvram`
-- `--output console|file`
-- `--log <path>`
-- `--force-setup`
-
-Supported model names include:
-- `Kimodo-SOMA-RP-v1`
-- `Kimodo-G1-RP-v1`
-- `Kimodo-SMPLX-RP-v1`
-- `Kimodo-SOMA-SEED-v1`
-- `Kimodo-G1-SEED-v1`
-- aliases like `soma`, `g1`, `smplx`, `soma-seed`
-
-## Server Config Behavior
-
-`run_server.bat` will:
-
-1. verify setup sentinel `.setup.complete`
-2. run setup if missing
-3. run model download for selected model/vram mode
-4. set local runtime env vars (`HF_HOME`, offline flags, `CHECKPOINT_DIR`, `KIMODO_ROOT_PATH`, etc.)
-5. start `python -m kimodo.bridge.bridge_server`
-
-Repeated start logic:
-- same signature + existing `serverport` -> skip and reuse
-- different signature + existing `serverport` -> send `quit`, wait, restart
-
-## Tests and Examples
-
-Main test:
-- `example\example_run_server_tpose.bat`
-
-What it validates:
-- start server
-- wait for `serverport`
-- `ping -> generate(tpose) -> quit`
-- detect `status=done`
-
-Timeout rule:
-- default: `600s`
-- override: `KIMODO_TEST_WAIT_TIMEOUT_SEC`
-
-## Logs
-
-Default logs are stored under `log\`:
-- `log\setup.log`
-- `log\download_model.log`
-- `log\run_server.log`
-- `log\example_run_server_tpose.log`
-- `log\example_run_server_tpose_client.log`
-
-When running example, console always prints full client output and also writes it to log file.
-
-## Notes
-
-- On Windows, `download_model.bat` checks `git` and `git-lfs` first. If missing, it can bootstrap local portable copies under `tools\` without modifying global PATH.
-- Model source normalization supports ModelScope `.../models/...` URLs.
-- Pipeline scripts are intentionally single-threaded for stability.
-
-## Known Issues
-
-- `.sh` wrappers depend on `cmd.exe` and are not native Linux launchers.
-- Restricted network can break git clone/lfs pulls, especially large model repos.
-- Partial model directory states may require `--force` or lock rotation (`--unlock-stale`).
-- Existing stale `serverport` or hung old process may require manual inspection if graceful `quit` fails.
-
-
+## Parameters
+- See `PARAMETERS.md`
