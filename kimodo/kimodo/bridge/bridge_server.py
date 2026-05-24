@@ -181,13 +181,31 @@ def _parents_and_names(model, num_joints: int):
     return parents, names
 
 
-def _load_constraints(path_or_json: str, model):
-    if not path_or_json:
+def _load_constraints(constraints_json: str, model):
+    if not constraints_json:
         return []
 
     from kimodo.constraints import load_constraints_lst
 
-    return load_constraints_lst(path_or_json, model.skeleton)
+    text = constraints_json.strip() if isinstance(constraints_json, str) else constraints_json
+    if not isinstance(text, str) or not text:
+        return []
+    if text[0] not in ("[", "{"):
+        raise ValueError(
+            "constraints_json must be inline JSON (array/object). File path input is no longer supported."
+        )
+
+    try:
+        parsed = json.loads(text)
+    except Exception as ex:
+        raise ValueError(f"Invalid inline constraints_json payload: {ex}") from ex
+
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        raise ValueError("constraints_json inline payload must be JSON array/object.")
+
+    return load_constraints_lst(parsed, model.skeleton)
 
 
 @dataclass
