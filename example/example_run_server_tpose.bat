@@ -11,6 +11,8 @@ set "MODEL=Kimodo-SOMA-RP-v1"
 if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
 set "HIGHVRAM=%KIMODO_TEST_HIGHVRAM%"
 if not defined HIGHVRAM set "HIGHVRAM=0"
+set "TEST_DEVICE=%KIMODO_TEST_DEVICE%"
+if not defined TEST_DEVICE set "TEST_DEVICE="
 set "USE_SHARED_MODELS=%KIMODO_TEST_USE_SHARED_MODELS%"
 if not defined USE_SHARED_MODELS set "USE_SHARED_MODELS=0"
 set "SHARED_MODELS_ROOT=%KIMODO_SHARED_MODELS_ROOT%"
@@ -52,6 +54,7 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODEL=%MODEL%
 echo [TEST] HIGHVRAM=%HIGHVRAM%
+if defined TEST_DEVICE echo [TEST] DEVICE=%TEST_DEVICE%
 echo [TEST] USE_SHARED_MODELS=%USE_SHARED_MODELS%
 if defined TEST_MODELS_ROOT echo [TEST] TEST_MODELS_ROOT=%TEST_MODELS_ROOT%
 echo [TEST] MODE=%OUTPUT_MODE%
@@ -200,6 +203,7 @@ exit /b 0
 call :archive_file "%SERVER_PID_FILE%"
 call :archive_file "%RUN_LOG%"
 set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $outputMode='%OUTPUT_MODE%'; if([string]::IsNullOrWhiteSpace($outputMode)){ $outputMode='console' }; if($outputMode -ieq 'file'){ $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath) } else { $argList=@('/d','/c',$launcher,'--model',$model,'--output','console') }; if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; $modelsRoot='%TEST_MODELS_ROOT%'; if(-not [string]::IsNullOrWhiteSpace($modelsRoot)){ $argList += @('--models-root',$modelsRoot) }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
+set "LAUNCH_PS=$ErrorActionPreference='Stop'; $launcher='%LAUNCHER%'; $wd='%ROOT_DIR%'; $model='%MODEL%'; $logPath='%RUN_LOG%'; $outputMode='%OUTPUT_MODE%'; if([string]::IsNullOrWhiteSpace($outputMode)){ $outputMode='console' }; if($outputMode -ieq 'file'){ $argList=@('/d','/c',$launcher,'--model',$model,'--output','file','--log',$logPath) } else { $argList=@('/d','/c',$launcher,'--model',$model,'--output','console') }; if('%HIGHVRAM%' -eq '1'){ $argList += '--highvram' }; if('%TEST_DEVICE%' -ne ''){ $argList += @('--device','%TEST_DEVICE%') }; $modelsRoot='%TEST_MODELS_ROOT%'; if(-not [string]::IsNullOrWhiteSpace($modelsRoot)){ $argList += @('--models-root',$modelsRoot) }; $winStyle='%SERVER_WINDOW_STYLE%'; if([string]::IsNullOrWhiteSpace($winStyle)){ $winStyle='Normal' }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $wd -WindowStyle $winStyle -PassThru; Set-Content -LiteralPath '%SERVER_PID_FILE%' -Value $p.Id -Encoding ASCII"
 call powershell -NoProfile -ExecutionPolicy Bypass -Command "%LAUNCH_PS%"
 if errorlevel 1 (
   echo [ERROR] launch_server_background failed.

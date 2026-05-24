@@ -28,6 +28,8 @@ set "VENV_PY="
 set "USING_EXTERNAL_MODELS=0"
 set "USING_EXTERNAL_VENV=0"
 set "MODEL_VALIDATE_NEEDS_REPAIR=0"
+set "RUN_DEVICE="
+set "TEXT_ENCODER_DEVICE_MODE=%TEXT_ENCODER_DEVICE%"
 set "CONFIG_ONLY=%KIMODO_CONFIG_ONLY%"
 if not defined CONFIG_ONLY set "CONFIG_ONLY=0"
 set "WATCHDOG_INTERVAL_SEC=%KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC%"
@@ -38,6 +40,8 @@ set "WATCHDOG_CONNECT_TIMEOUT_MS=%KIMODO_WATCHDOG_CONNECT_TIMEOUT_MS%"
 if not defined WATCHDOG_CONNECT_TIMEOUT_MS set "WATCHDOG_CONNECT_TIMEOUT_MS=800"
 set "WATCHDOG_RUNTIME_INTERVAL_SEC=%KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC%"
 if not defined WATCHDOG_RUNTIME_INTERVAL_SEC set "WATCHDOG_RUNTIME_INTERVAL_SEC=1"
+set "WATCHDOG_IDLE_NOLOG_USER_SET=0"
+if defined KIMODO_WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_USER_SET=1"
 set "WATCHDOG_IDLE_NOLOG_MAX=%KIMODO_WATCHDOG_IDLE_NOLOG_MAX%"
 if not defined WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_MAX=300"
 set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
@@ -75,6 +79,12 @@ if /I "%~1"=="--models-root" (
 )
 if /I "%~1"=="--venv" (
   set "VENV_PATH_ARG=%~2"
+  shift
+  shift
+  goto parse_args
+)
+if /I "%~1"=="--device" (
+  set "RUN_DEVICE=%~2"
   shift
   shift
   goto parse_args
@@ -134,6 +144,27 @@ if "%USING_EXTERNAL_VENV%"=="0" (
     exit /b 1
   )
 )
+if defined RUN_DEVICE (
+  if /I "%RUN_DEVICE%"=="cpu" (
+    set "TEXT_ENCODER_DEVICE_MODE=cpu"
+    if "%WATCHDOG_IDLE_NOLOG_USER_SET%"=="0" set "WATCHDOG_IDLE_NOLOG_MAX=1800"
+  ) else (
+    if /I "%RUN_DEVICE%"=="cuda" (
+      set "RUN_DEVICE=cuda:0"
+      if not defined TEXT_ENCODER_DEVICE_MODE set "TEXT_ENCODER_DEVICE_MODE=auto"
+    ) else (
+      if /I "%RUN_DEVICE:~0,4%"=="cuda" (
+        if not defined TEXT_ENCODER_DEVICE_MODE set "TEXT_ENCODER_DEVICE_MODE=auto"
+      ) else (
+        echo [ERROR] Invalid --device value: %RUN_DEVICE%
+        echo [ERROR] Allowed values: cpu ^| cuda ^| cuda:0 ...
+        exit /b 1
+      )
+    )
+  )
+) else (
+  if not defined TEXT_ENCODER_DEVICE_MODE set "TEXT_ENCODER_DEVICE_MODE=auto"
+)
 
 if /I "%HIGHVRAM%"=="1" (
   set "KIMODO_LLM2VEC_DIR=%MODELS_ROOT%\Meta-Llama-3-8B-Instruct"
@@ -147,6 +178,8 @@ if /I "%HIGHVRAM%"=="1" (
 
 set "CUR_SIG=model=%MODEL_RUN_NAME%;highvram=%HIGHVRAM%;models=%MODELS_ROOT%;llm2vec=%KIMODO_LLM2VEC_DIR%"
 if defined VENV_PY set "CUR_SIG=%CUR_SIG%;venv=%VENV_PY%"
+if defined RUN_DEVICE set "CUR_SIG=%CUR_SIG%;device=%RUN_DEVICE%"
+if defined TEXT_ENCODER_DEVICE_MODE set "CUR_SIG=%CUR_SIG%;textenc=%TEXT_ENCODER_DEVICE_MODE%"
 set "PREV_SIG="
 if exist "%SERVER_STATE%" (
   for /f "usebackq tokens=1,* delims==" %%A in ("%SERVER_STATE%") do (
@@ -233,6 +266,9 @@ set "CHECKPOINT_DIR=%MODELS_ROOT%"
 set "LOCAL_CACHE=true"
 set "TEXT_ENCODER_MODE=local"
 set "TEXT_ENCODER=llm2vec"
+set "TEXT_ENCODER_DEVICE=%TEXT_ENCODER_DEVICE_MODE%"
+echo [INFO] Runtime device: %RUN_DEVICE%
+echo [INFO] Text encoder device: %TEXT_ENCODER_DEVICE%
 set "HF_HOME=%ROOT_DIR%\hf_cache"
 set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
 set "HF_HUB_CACHE=%HF_HOME%\hub"
@@ -259,19 +295,31 @@ if /I "%CONFIG_ONLY%"=="1" (
 
 set "KIMODO_IDLE_TIMEOUT_SEC=600"
 if exist "%BRIDGE_PID_FILE%" call :archive_file "%BRIDGE_PID_FILE%"
+set "WATCHDOG_LOG_PATH=%ROOT_DIR%\log\bridge_server.log"
 
 if /I "%OUTPUT_MODE%"=="file" (
   set "LOG_USED=%LOG_PATH%"
+  set "WATCHDOG_LOG_PATH=%ROOT_DIR%\log\bridge_server.log"
   echo [INFO] run_server log: !LOG_USED!
   echo [INFO] bridge bootstrap log: %BOOTSTRAP_LOG_PATH%
   type nul > "!LOG_USED!"
   if exist "%BOOTSTRAP_LOG_PATH%" call :archive_file "%BOOTSTRAP_LOG_PATH%"
   type nul > "%BOOTSTRAP_LOG_PATH%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='!LOG_USED!'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -RedirectStandardError '%BOOTSTRAP_LOG_PATH%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+  if defined RUN_DEVICE (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='!LOG_USED!'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%','--device','%RUN_DEVICE%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -RedirectStandardError '%BOOTSTRAP_LOG_PATH%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+  ) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$ErrorActionPreference='Stop'; $env:KIMODO_BRIDGE_LOG='!LOG_USED!'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -RedirectStandardError '%BOOTSTRAP_LOG_PATH%' -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+  )
 ) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -NoNewWindow -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+  if defined RUN_DEVICE (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$ErrorActionPreference='Stop'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%','--device','%RUN_DEVICE%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -NoNewWindow -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+  ) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$ErrorActionPreference='Stop'; $args=@('-u','-m','kimodo.bridge.bridge_server','--model','%MODEL_RUN_NAME%','--kimodo-root','%ROOT_DIR%'); $p=Start-Process -FilePath '%VENV_PY%' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -NoNewWindow -PassThru; $p.Id | Out-File -LiteralPath '%BRIDGE_PID_FILE%' -Encoding ascii;"
+  )
 )
 if errorlevel 1 (
   echo [ERROR] Failed to start bridge server process.
@@ -428,8 +476,7 @@ set "WD_PID=%~1"
 set /a WD_FAILS=0
 set "WATCHDOG_STARTED_OK=0"
 set /a WD_LOG_STALE=0
-set "WD_LOG_PATH=%ROOT_DIR%\log\bridge_server.log"
-if /I "%OUTPUT_MODE%"=="file" set "WD_LOG_PATH=%LOG_PATH%"
+set "WD_LOG_PATH=%WATCHDOG_LOG_PATH%"
 set "WD_LOG_LAST="
 
 :watchdog_tick

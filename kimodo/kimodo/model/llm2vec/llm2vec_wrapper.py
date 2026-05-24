@@ -28,12 +28,30 @@ class LLM2VecEncoder(nn.Module):
 
         self.custom_dir = self._resolve_local_text_encoder_dir()
         self.custom_peft_dir = self._resolve_local_llm2vec_peft_dir()
+        self.target_device = self._resolve_target_device()
 
         print(f"[LLM2VecEncoder] Initializing model from {self.custom_dir}...")
         if self.custom_peft_dir:
             print(f"[LLM2VecEncoder] Using PEFT adapter from {self.custom_peft_dir}...")
+        print(f"[LLM2VecEncoder] target_device={self.target_device}")
         print(f"[LLM2VecEncoder] Initialized (Waiting for first use to load weights)...")
         self.model = None
+
+    def _resolve_target_device(self) -> str:
+        mode = os.environ.get("TEXT_ENCODER_DEVICE", "auto").strip().lower()
+        if mode == "cpu":
+            return "cpu"
+        if mode.startswith("mps"):
+            return "mps" if torch.backends.mps.is_available() else "cpu"
+        if mode.startswith("cuda"):
+            if torch.cuda.is_available():
+                return mode
+            return "cpu"
+        if torch.cuda.is_available():
+            return "cuda:0"
+        if torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
 
     def _resolve_local_text_encoder_dir(self) -> str:
         """Resolve local LLM2Vec directory for offline runs."""
@@ -157,17 +175,15 @@ class LLM2VecEncoder(nn.Module):
                 device_map="cpu"
             )
 
-        from kimodo.demo.memory_manager import manager
-        manager.ensure_vram_capacity(5400 * 1024 * 1024, device="cuda:0", exclude_name="text_encoder")
+        if self.target_device.startswith("cuda"):
+            from kimodo.demo.memory_manager import manager
+            manager.ensure_vram_capacity(5400 * 1024 * 1024, device=self.target_device, exclude_name="text_encoder")
 
         curr_device = self.get_device()
-        if curr_device.type != "cuda":
-            if torch.backends.mps.is_available():
-                print(f"[LLM2VecEncoder] Moving weights to GPU (mps)...")
-                self.model.model.to("mps")
-            else:
-                print(f"[LLM2VecEncoder] Moving weights to GPU (cuda:0)...")
-                self.model.model.to("cuda:0")
+        desired_type = self.target_device.split(":")[0]
+        if curr_device.type != desired_type:
+            print(f"[LLM2VecEncoder] Moving weights to {self.target_device}...")
+            self.model.model.to(self.target_device)
             
             gc.collect()
             
@@ -187,9 +203,11 @@ class LLM2VecEncoder(nn.Module):
             if torch.backends.mps.is_available():
                 torch.mps.empty_cache()
             
-            manager.log_memory_usage("Encoder Transfer Complete (RAM Reclaimed)")
+            if self.target_device.startswith("cuda"):
+                from kimodo.demo.memory_manager import manager
+                manager.log_memory_usage("Encoder Transfer Complete (RAM Reclaimed)")
         else:
-            print(f"[LLM2VecEncoder] Model already on GPU ({curr_device})")
+            print(f"[LLM2VecEncoder] Model already on target device ({curr_device})")
 
     def get_device(self):
         if self.model is None:
