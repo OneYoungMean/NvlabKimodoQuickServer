@@ -8,6 +8,7 @@ set "LAUNCHER=%ROOT_DIR%\run_server.bat"
 set "CLIENT_PS1=%SCRIPT_DIR%\example_run_server_tpose_client.ps1"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "PID_FILE=%ROOT_DIR%\log\example_run_server_tpose.pid"
+set "SERVER_LOG=%ROOT_DIR%\log\example_run_server_tpose_server.log"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%"
 if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=30"
@@ -34,13 +35,14 @@ echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODEL=%MODEL%
 echo [TEST] DEVICE=%DEVICE%
 echo [TEST] VENV_PATH=%VENV_PATH%
-echo [TEST] OUTPUT=console
+echo [TEST] OUTPUT=file
 
 call :archive_file "%PORT_FILE%"
 call :archive_file "%PID_FILE%"
+call :archive_file "%SERVER_LOG%"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%','--venv','%VENV_PATH%','--output','console'); $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
+  "$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%','--venv','%VENV_PATH%','--output','file','--log','%SERVER_LOG%'); $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
 if errorlevel 1 (
   echo [ERROR] failed to launch run_server.
   exit /b 1

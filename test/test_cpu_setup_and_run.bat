@@ -21,14 +21,14 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not exist "%RECYCLE_DIR%" mkdir "%RECYCLE_DIR%" >nul 2>nul
 
 set "SETUP_LOG=%LOG_DIR%\test_cpu_setup.log"
-set "RUN_CONSOLE_LOG=%LOG_DIR%\test_cpu_run_console.log"
+set "RUN_LOG=%LOG_DIR%\test_cpu_run.log"
 set "RUN_BRIDGE_LOG=%LOG_DIR%\test_cpu_bridge.log"
 set "RUN_PID_FILE=%LOG_DIR%\test_cpu_run.pid"
 set "RUN_WRAPPER=%LOG_DIR%\test_cpu_run_wrapper.bat"
 set "RUN_WINDOW_TITLE=KIMODO_TEST_CPU_RUN"
 
 call :archive_file "%SETUP_LOG%"
-call :archive_file "%RUN_CONSOLE_LOG%"
+call :archive_file "%RUN_LOG%"
 call :archive_file "%RUN_BRIDGE_LOG%"
 call :archive_file "%RUN_PID_FILE%"
 call :archive_file "%PORT_FILE%"
@@ -45,7 +45,7 @@ echo [STEP] run_server cpu mode...
 > "%RUN_WRAPPER%" (
   echo @echo off
   echo cd /d "%ROOT_DIR%"
-  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --device cpu --models-root "%MODELS_ROOT%" --venv "%ROOT_DIR%\kimodo\.venv" --output file --log "%RUN_BRIDGE_LOG%" ^> "%RUN_CONSOLE_LOG%" 2^>^&1
+  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --device cpu --models-root "%MODELS_ROOT%" --venv "%ROOT_DIR%\kimodo\.venv" --output file --log "%RUN_LOG%"
 )
 start "%RUN_WINDOW_TITLE%" cmd /k call "%RUN_WRAPPER%"
 
@@ -65,7 +65,7 @@ set /a WAIT_SEC+=1
 if !WAIT_SEC! geq 180 (
   echo [ERROR] timeout waiting serverport.
   call :kill_pid_file "%RUN_PID_FILE%"
-  if exist "%RUN_CONSOLE_LOG%" powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%RUN_CONSOLE_LOG%' -Tail 120"
+  if exist "%RUN_LOG%" powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%RUN_LOG%' -Tail 120"
   exit /b 1
 )
 goto wait_port

@@ -54,10 +54,10 @@ exit /b 0
 call :is_pid_running "%WD_PID%"
 if errorlevel 1 (
   if "%WATCHDOG_STARTED_OK%"=="1" (
-    echo [INFO] Bridge process exited. pid=%WD_PID%
+    echo [INFO] Bridge process/thread invalid. pid=%WD_PID%
     exit /b 0
   ) else (
-    echo [ERROR] Bridge process exited before serverport appeared. pid=%WD_PID%
+    echo [ERROR] Bridge process/thread invalid before serverport appeared. pid=%WD_PID%
     exit /b 1
   )
 )

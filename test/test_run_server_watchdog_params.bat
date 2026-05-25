@@ -45,11 +45,11 @@ set "CASE_IDLE_NOLOG_MAX=%~5"
 
 echo [CASE] %CASE_NAME%
 
-set "CASE_CONSOLE_LOG=%LOG_DIR%\test_watchdog_%CASE_NAME%_console.log"
+set "CASE_RUN_LOG=%LOG_DIR%\test_watchdog_%CASE_NAME%_run.log"
 set "CASE_BRIDGE_LOG=%LOG_DIR%\test_watchdog_%CASE_NAME%_bridge.log"
 set "CASE_PID_FILE=%LOG_DIR%\test_watchdog_%CASE_NAME%_run_server.pid"
 
-call :archive_file "%CASE_CONSOLE_LOG%"
+call :archive_file "%CASE_RUN_LOG%"
 call :archive_file "%CASE_BRIDGE_LOG%"
 call :archive_file "%CASE_PID_FILE%"
 call :archive_file "%PORT_FILE%"
@@ -64,9 +64,9 @@ set "CASE_WRAPPER=%LOG_DIR%\test_watchdog_%CASE_NAME%_wrapper.bat"
   if defined CASE_RUNTIME_INTERVAL echo set "KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC=%CASE_RUNTIME_INTERVAL%"
   if defined CASE_IDLE_NOLOG_MAX echo set "KIMODO_WATCHDOG_IDLE_NOLOG_MAX=%CASE_IDLE_NOLOG_MAX%"
   if defined VENV_PATH (
-    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output console --venv "%VENV_PATH%" ^> "%CASE_CONSOLE_LOG%" 2^>^&1
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%CASE_RUN_LOG%" --venv "%VENV_PATH%"
   ) else (
-    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output console ^> "%CASE_CONSOLE_LOG%" 2^>^&1
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%CASE_RUN_LOG%"
   )
   echo endlocal
 )
@@ -125,10 +125,10 @@ set "EXPECT_B=startup_max_fails=%EXP_STARTUP_MAX_FAILS%"
 set "EXPECT_C=runtime_interval=%EXP_RUNTIME_INTERVAL%s"
 set "EXPECT_D=idle_nolog_max=%EXP_IDLE_NOLOG_MAX%"
 
-findstr /C:"%EXPECT_A%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
-findstr /C:"%EXPECT_B%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
-findstr /C:"%EXPECT_C%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
-findstr /C:"%EXPECT_D%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
+findstr /C:"%EXPECT_A%" "%CASE_RUN_LOG%" >nul || goto case_failed
+findstr /C:"%EXPECT_B%" "%CASE_RUN_LOG%" >nul || goto case_failed
+findstr /C:"%EXPECT_C%" "%CASE_RUN_LOG%" >nul || goto case_failed
+findstr /C:"%EXPECT_D%" "%CASE_RUN_LOG%" >nul || goto case_failed
 
 echo [CASE:%CASE_NAME%] [PASS]
 exit /b 0
@@ -139,8 +139,8 @@ echo [CASE:%CASE_NAME%] expected: %EXPECT_A%
 echo [CASE:%CASE_NAME%] expected: %EXPECT_B%
 echo [CASE:%CASE_NAME%] expected: %EXPECT_C%
 echo [CASE:%CASE_NAME%] expected: %EXPECT_D%
-if exist "%CASE_CONSOLE_LOG%" (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%CASE_CONSOLE_LOG%' -Tail 80"
+if exist "%CASE_RUN_LOG%" (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%CASE_RUN_LOG%' -Tail 80"
 )
 call :kill_case_window "%LAUNCH_TITLE%_%CASE_NAME%"
 set /a FAIL_COUNT+=1

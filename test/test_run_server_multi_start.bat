@@ -96,12 +96,12 @@ call :archive_file "%RUN_LOG%"
 
 if defined VENV_PATH (
   pushd "%ROOT_DIR%" >nul
-  call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --venv "%VENV_PATH%" --output console > "%RUN_LOG%" 2>&1
+  call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --venv "%VENV_PATH%" --output file --log "%RUN_LOG%"
   set "RC=%ERRORLEVEL%"
   popd >nul
 ) else (
   pushd "%ROOT_DIR%" >nul
-  call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output console > "%RUN_LOG%" 2>&1
+  call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%RUN_LOG%"
   set "RC=%ERRORLEVEL%"
   popd >nul
 )
