@@ -24,6 +24,8 @@ set "SETUP_LOG=%LOG_DIR%\test_cpu_setup.log"
 set "RUN_CONSOLE_LOG=%LOG_DIR%\test_cpu_run_console.log"
 set "RUN_BRIDGE_LOG=%LOG_DIR%\test_cpu_bridge.log"
 set "RUN_PID_FILE=%LOG_DIR%\test_cpu_run.pid"
+set "RUN_WRAPPER=%LOG_DIR%\test_cpu_run_wrapper.bat"
+set "RUN_WINDOW_TITLE=KIMODO_TEST_CPU_RUN"
 
 call :archive_file "%SETUP_LOG%"
 call :archive_file "%RUN_CONSOLE_LOG%"
@@ -40,14 +42,12 @@ if errorlevel 1 (
 )
 
 echo [STEP] run_server cpu mode...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $root='%ROOT_DIR%'; $log='%RUN_CONSOLE_LOG%'; $bridge='%RUN_BRIDGE_LOG%'; $pidFile='%RUN_PID_FILE%';" ^
-  "$argList=@('/d','/c','run_server.bat','--model','Kimodo-SOMA-RP-v1','--device','cpu','--models-root','%MODELS_ROOT%','--venv','%ROOT_DIR%\\kimodo\\.venv','--output','file','--log',$bridge);" ^
-  "$p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $root -RedirectStandardOutput $log -PassThru; Set-Content -LiteralPath $pidFile -Value $p.Id -Encoding ASCII"
-if errorlevel 1 (
-  echo [ERROR] failed to start run_server cpu.
-  exit /b 1
+> "%RUN_WRAPPER%" (
+  echo @echo off
+  echo cd /d "%ROOT_DIR%"
+  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --device cpu --models-root "%MODELS_ROOT%" --venv "%ROOT_DIR%\kimodo\.venv" --output file --log "%RUN_BRIDGE_LOG%" ^> "%RUN_CONSOLE_LOG%" 2^>^&1
 )
+start "%RUN_WINDOW_TITLE%" cmd /k call "%RUN_WRAPPER%"
 
 set "HOST="
 set "PORT="
@@ -128,6 +128,10 @@ if defined KPID (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference='SilentlyContinue'; $pidValue='%KPID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
 )
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; $root=(Resolve-Path -LiteralPath '%ROOT_DIR%').Path; $pat=[regex]::Escape($root); Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match 'kimodo\\.bridge\\.bridge_server' -and $_.CommandLine -match $pat } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match [regex]::Escape('%RUN_WRAPPER%') } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
 call :archive_file "%KFILE%"
 exit /b 0
 

@@ -55,15 +55,15 @@
 - `KIMODO_MODELS_ROOT`: 默认 models 根目录（可被 `--models-root` 覆盖）。
 - `KIMODO_IDLE_TIMEOUT_SEC`: 服务空闲退出秒数（当前设定 `600`）。
 
-### 启动探活与 watchdog（已优化）
-- `KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC`: 启动期探活间隔（默认 `1` 秒）。
-- `KIMODO_WATCHDOG_STARTUP_MAX_FAILS`: 启动期最大连续失败次数（默认 `30`）。
-- `KIMODO_WATCHDOG_CONNECT_TIMEOUT_MS`: 每次连接超时（默认 `800` ms）。
-- `KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC`: 运行期检查间隔（默认 `1` 秒）。
-- `KIMODO_WATCHDOG_IDLE_NOLOG_MAX`: 日志不更新次数阈值（默认 `300`）。
+### 启动与 watchdog
+- `KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC`: 启动阶段等待 `serverport` 的轮询间隔（默认 `1` 秒）。
+- `KIMODO_WATCHDOG_STARTUP_MAX_FAILS`: 启动阶段等待 `serverport` 的最大轮询次数（默认 `180`）。
+- `KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC`: 运行阶段检查 `log\bridge_message.log` 更新时间间隔（默认 `1` 秒）。
+- `KIMODO_WATCHDOG_IDLE_NOLOG_MAX`: 运行阶段日志未更新的最大连续次数（默认 `300`），超过则自动关闭进程。
 
 说明：
-- 默认总启动探活窗口约 `30s`（`1s * 30`），比原 `3s * 10` 体感更快。
+- 默认启动等待窗口约 `180s`（`1s * 180`）。
+- 不做 `serverport` 回填、不做 TCP 探活；`serverport` 仅由 bridge server 写入。
 
 ## 5. `example\example_run_server_tpose.bat`
 - 默认流程：后台启动 `run_server` -> 读取 `serverport` -> 发送 `ping/generate(tpose)/quit`。

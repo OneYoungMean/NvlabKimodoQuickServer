@@ -49,17 +49,13 @@ if not defined CONFIG_ONLY set "CONFIG_ONLY=0"
 set "WATCHDOG_INTERVAL_SEC=%KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC%"
 if not defined WATCHDOG_INTERVAL_SEC set "WATCHDOG_INTERVAL_SEC=1"
 set "WATCHDOG_MAX_FAILS=%KIMODO_WATCHDOG_STARTUP_MAX_FAILS%"
-if not defined WATCHDOG_MAX_FAILS set "WATCHDOG_MAX_FAILS=30"
-set "WATCHDOG_CONNECT_TIMEOUT_MS=%KIMODO_WATCHDOG_CONNECT_TIMEOUT_MS%"
-if not defined WATCHDOG_CONNECT_TIMEOUT_MS set "WATCHDOG_CONNECT_TIMEOUT_MS=800"
+if not defined WATCHDOG_MAX_FAILS set "WATCHDOG_MAX_FAILS=180"
 set "WATCHDOG_RUNTIME_INTERVAL_SEC=%KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC%"
 if not defined WATCHDOG_RUNTIME_INTERVAL_SEC set "WATCHDOG_RUNTIME_INTERVAL_SEC=1"
-set "WATCHDOG_IDLE_NOLOG_USER_SET=0"
-if defined KIMODO_WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_USER_SET=1"
 set "WATCHDOG_IDLE_NOLOG_MAX=%KIMODO_WATCHDOG_IDLE_NOLOG_MAX%"
 if not defined WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_MAX=300"
 set "SERVER_WINDOW_STYLE=%KIMODO_SERVER_WINDOW_STYLE%"
-if not defined SERVER_WINDOW_STYLE set "SERVER_WINDOW_STYLE=Hidden"
+if not defined SERVER_WINDOW_STYLE set "SERVER_WINDOW_STYLE=Normal"
 set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 
 :parse_args
@@ -183,7 +179,6 @@ if "%USING_EXTERNAL_VENV%"=="0" (
 if defined RUN_DEVICE (
   if /I "%RUN_DEVICE%"=="cpu" (
     set "TEXT_ENCODER_DEVICE_MODE=cpu"
-    if "%WATCHDOG_IDLE_NOLOG_USER_SET%"=="0" set "WATCHDOG_IDLE_NOLOG_MAX=1800"
   ) else (
     if /I "%RUN_DEVICE%"=="cuda" (
       set "RUN_DEVICE=cuda:0"
@@ -289,10 +284,28 @@ if /I "%OUTPUT_MODE%"=="file" (
   type nul > "%BRIDGE_MESSAGE_LOG_PATH%"
 )
 
-set "LAUNCH_DEVICE_ARG="
-if defined RUN_DEVICE set "LAUNCH_DEVICE_ARG=-Device %RUN_DEVICE%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "& { & '%LAUNCH_BRIDGE_PS1%' -PythonPath '%VENV_PY%' -RootDir '%ROOT_DIR%' -ModelName '%MODEL_RUN_NAME%' !LAUNCH_DEVICE_ARG! -WindowStyle '%SERVER_WINDOW_STYLE%' -BridgeLogPath '%BOOTSTRAP_LOG_PATH%' -BridgeMessageLogPath '%BRIDGE_MESSAGE_LOG_PATH%' -PidFile '%BRIDGE_PID_FILE%' -OutputMode '%OUTPUT_MODE%' }"
+if defined RUN_DEVICE (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%LAUNCH_BRIDGE_PS1%" ^
+    -PythonPath "%VENV_PY%" ^
+    -RootDir "%ROOT_DIR%" ^
+    -ModelName "%MODEL_RUN_NAME%" ^
+    -Device "%RUN_DEVICE%" ^
+    -WindowStyle "%SERVER_WINDOW_STYLE%" ^
+    -BridgeLogPath "%BOOTSTRAP_LOG_PATH%" ^
+    -BridgeMessageLogPath "%BRIDGE_MESSAGE_LOG_PATH%" ^
+    -PidFile "%BRIDGE_PID_FILE%" ^
+    -OutputMode "%OUTPUT_MODE%"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%LAUNCH_BRIDGE_PS1%" ^
+    -PythonPath "%VENV_PY%" ^
+    -RootDir "%ROOT_DIR%" ^
+    -ModelName "%MODEL_RUN_NAME%" ^
+    -WindowStyle "%SERVER_WINDOW_STYLE%" ^
+    -BridgeLogPath "%BOOTSTRAP_LOG_PATH%" ^
+    -BridgeMessageLogPath "%BRIDGE_MESSAGE_LOG_PATH%" ^
+    -PidFile "%BRIDGE_PID_FILE%" ^
+    -OutputMode "%OUTPUT_MODE%"
+)
 if errorlevel 1 (
   echo [ERROR] Failed to start bridge server process.
   exit /b 1
@@ -306,7 +319,7 @@ if not defined SERVER_PID (
   echo [ERROR] Missing bridge PID in %BRIDGE_PID_FILE%
   exit /b 1
 )
-call "%WATCHDOG_BRIDGE_BAT%" "%ROOT_DIR%" "%SERVER_PID%" "%PORT_FILE%" "%BOOTSTRAP_LOG_PATH%" "%WATCHDOG_INTERVAL_SEC%" "%WATCHDOG_MAX_FAILS%" "%WATCHDOG_CONNECT_TIMEOUT_MS%" "%WATCHDOG_RUNTIME_INTERVAL_SEC%" "%WATCHDOG_IDLE_NOLOG_MAX%"
+call "%WATCHDOG_BRIDGE_BAT%" "%ROOT_DIR%" "%SERVER_PID%" "%PORT_FILE%" "%BOOTSTRAP_LOG_PATH%" "%WATCHDOG_INTERVAL_SEC%" "%WATCHDOG_MAX_FAILS%" "%WATCHDOG_RUNTIME_INTERVAL_SEC%" "%WATCHDOG_IDLE_NOLOG_MAX%"
 set "RC=%ERRORLEVEL%"
 call "%COMMON_ENV_BAT%" :archive_file "%BRIDGE_PID_FILE%" "%RECYCLE_DIR%"
 exit /b %RC%

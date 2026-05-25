@@ -21,11 +21,13 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not exist "%ARCHIVE_DIR%" mkdir "%ARCHIVE_DIR%" >nul 2>nul
 
 call :archive_file "%PORT_FILE%"
+call :cleanup_bridge_processes
 
 set "FAIL_COUNT=0"
-call :run_case "defaults" "" "" "" "" ""
-call :run_case "custom_fast" "2" "12" "500" "" ""
-call :run_case "custom_runtime_idle" "1" "30" "700" "2" "15"
+set "LAUNCH_TITLE=KIMODO_TEST_WATCHDOG"
+call :run_case "defaults" "" "" "" ""
+call :run_case "custom_fast" "2" "12" "" ""
+call :run_case "custom_runtime_idle" "1" "30" "2" "15"
 
 if not "%FAIL_COUNT%"=="0" (
   echo [RESULT] FAILED cases=%FAIL_COUNT%
@@ -38,9 +40,8 @@ exit /b 0
 set "CASE_NAME=%~1"
 set "CASE_STARTUP_INTERVAL=%~2"
 set "CASE_MAX_FAILS=%~3"
-set "CASE_CONNECT_MS=%~4"
-set "CASE_RUNTIME_INTERVAL=%~5"
-set "CASE_IDLE_NOLOG_MAX=%~6"
+set "CASE_RUNTIME_INTERVAL=%~4"
+set "CASE_IDLE_NOLOG_MAX=%~5"
 
 echo [CASE] %CASE_NAME%
 
@@ -53,21 +54,23 @@ call :archive_file "%CASE_BRIDGE_LOG%"
 call :archive_file "%CASE_PID_FILE%"
 call :archive_file "%PORT_FILE%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop';" ^
-  "$root='%ROOT_DIR%';" ^
-  "$consoleLog='%CASE_CONSOLE_LOG%';" ^
-  "$bridgeLog='%CASE_BRIDGE_LOG%';" ^
-  "$pidFile='%CASE_PID_FILE%';" ^
-  "$argList=@('/d','/c','run_server.bat','--model','Kimodo-SOMA-RP-v1','--models-root','%MODELS_ROOT%','--output','file','--log',$bridgeLog); if('%VENV_PATH%' -ne ''){ $argList += @('--venv','%VENV_PATH%') };" ^
-  "$envMap=@{};" ^
-  "if('%CASE_STARTUP_INTERVAL%' -ne ''){ $envMap['KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC']='%CASE_STARTUP_INTERVAL%' } else { Remove-Item Env:KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC -ErrorAction SilentlyContinue };" ^
-  "if('%CASE_MAX_FAILS%' -ne ''){ $envMap['KIMODO_WATCHDOG_STARTUP_MAX_FAILS']='%CASE_MAX_FAILS%' } else { Remove-Item Env:KIMODO_WATCHDOG_STARTUP_MAX_FAILS -ErrorAction SilentlyContinue };" ^
-  "if('%CASE_CONNECT_MS%' -ne ''){ $envMap['KIMODO_WATCHDOG_CONNECT_TIMEOUT_MS']='%CASE_CONNECT_MS%' } else { Remove-Item Env:KIMODO_WATCHDOG_CONNECT_TIMEOUT_MS -ErrorAction SilentlyContinue };" ^
-  "if('%CASE_RUNTIME_INTERVAL%' -ne ''){ $envMap['KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC']='%CASE_RUNTIME_INTERVAL%' } else { Remove-Item Env:KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC -ErrorAction SilentlyContinue };" ^
-  "if('%CASE_IDLE_NOLOG_MAX%' -ne ''){ $envMap['KIMODO_WATCHDOG_IDLE_NOLOG_MAX']='%CASE_IDLE_NOLOG_MAX%' } else { Remove-Item Env:KIMODO_WATCHDOG_IDLE_NOLOG_MAX -ErrorAction SilentlyContinue };" ^
-  "$old=@{}; foreach($k in $envMap.Keys){ $old[$k]=[Environment]::GetEnvironmentVariable($k,'Process'); [Environment]::SetEnvironmentVariable($k,$envMap[$k],'Process') };" ^
-  "try { $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $argList -WorkingDirectory $root -RedirectStandardOutput $consoleLog -PassThru; Set-Content -LiteralPath $pidFile -Value $p.Id -Encoding ASCII } finally { foreach($k in $envMap.Keys){ [Environment]::SetEnvironmentVariable($k,$old[$k],'Process') } }"
+set "CASE_WRAPPER=%LOG_DIR%\test_watchdog_%CASE_NAME%_wrapper.bat"
+> "%CASE_WRAPPER%" (
+  echo @echo off
+  echo setlocal EnableExtensions EnableDelayedExpansion
+  echo cd /d "%ROOT_DIR%"
+  if defined CASE_STARTUP_INTERVAL echo set "KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC=%CASE_STARTUP_INTERVAL%"
+  if defined CASE_MAX_FAILS echo set "KIMODO_WATCHDOG_STARTUP_MAX_FAILS=%CASE_MAX_FAILS%"
+  if defined CASE_RUNTIME_INTERVAL echo set "KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC=%CASE_RUNTIME_INTERVAL%"
+  if defined CASE_IDLE_NOLOG_MAX echo set "KIMODO_WATCHDOG_IDLE_NOLOG_MAX=%CASE_IDLE_NOLOG_MAX%"
+  if defined VENV_PATH (
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output console --venv "%VENV_PATH%" ^> "%CASE_CONSOLE_LOG%" 2^>^&1
+  ) else (
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output console ^> "%CASE_CONSOLE_LOG%" 2^>^&1
+  )
+  echo endlocal
+)
+start "%LAUNCH_TITLE%_%CASE_NAME%" cmd /k call "%CASE_WRAPPER%"
 if errorlevel 1 (
   echo [CASE:%CASE_NAME%] [ERROR] failed to start run_server
   set /a FAIL_COUNT+=1
@@ -89,7 +92,7 @@ ping 127.0.0.1 -n 2 >nul
 set /a WAIT_SEC+=1
 if !WAIT_SEC! geq 120 (
   echo [CASE:%CASE_NAME%] [ERROR] timeout waiting serverport
-  call :kill_case_pid "%CASE_PID_FILE%"
+  call :kill_case_window "%LAUNCH_TITLE%_%CASE_NAME%"
   set /a FAIL_COUNT+=1
   exit /b 0
 )
@@ -100,13 +103,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='SilentlyContinue'; $h='%HOST%'; $p=[int]%PORT%; $c=$null; try { $c=New-Object Net.Sockets.TcpClient($h,$p); $s=$c.GetStream(); $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $w.WriteLine('{""cmd"":""quit""}'); $w.Close(); $s.Close() } finally { if($c){$c.Close()} }" >nul 2>nul
 
 call :wait_case_exit "%CASE_PID_FILE%" 90
+call :count_bridge_processes BRIDGE_LEFT
+if not "%BRIDGE_LEFT%"=="0" (
+  echo [CASE:%CASE_NAME%] [FAIL] leftover bridge processes=%BRIDGE_LEFT%
+  call :cleanup_bridge_processes
+  set /a FAIL_COUNT+=1
+  exit /b 0
+)
 
 set "EXP_STARTUP_INTERVAL=%CASE_STARTUP_INTERVAL%"
 if not defined EXP_STARTUP_INTERVAL set "EXP_STARTUP_INTERVAL=1"
 set "EXP_STARTUP_MAX_FAILS=%CASE_MAX_FAILS%"
-if not defined EXP_STARTUP_MAX_FAILS set "EXP_STARTUP_MAX_FAILS=30"
-set "EXP_CONNECT_MS=%CASE_CONNECT_MS%"
-if not defined EXP_CONNECT_MS set "EXP_CONNECT_MS=800"
+if not defined EXP_STARTUP_MAX_FAILS set "EXP_STARTUP_MAX_FAILS=180"
 set "EXP_RUNTIME_INTERVAL=%CASE_RUNTIME_INTERVAL%"
 if not defined EXP_RUNTIME_INTERVAL set "EXP_RUNTIME_INTERVAL=1"
 set "EXP_IDLE_NOLOG_MAX=%CASE_IDLE_NOLOG_MAX%"
@@ -114,15 +122,13 @@ if not defined EXP_IDLE_NOLOG_MAX set "EXP_IDLE_NOLOG_MAX=300"
 
 set "EXPECT_A=startup_interval=%EXP_STARTUP_INTERVAL%s"
 set "EXPECT_B=startup_max_fails=%EXP_STARTUP_MAX_FAILS%"
-set "EXPECT_C=connect_timeout=%EXP_CONNECT_MS%ms"
-set "EXPECT_D=runtime_interval=%EXP_RUNTIME_INTERVAL%s"
-set "EXPECT_E=idle_nolog_max=%EXP_IDLE_NOLOG_MAX%"
+set "EXPECT_C=runtime_interval=%EXP_RUNTIME_INTERVAL%s"
+set "EXPECT_D=idle_nolog_max=%EXP_IDLE_NOLOG_MAX%"
 
 findstr /C:"%EXPECT_A%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
 findstr /C:"%EXPECT_B%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
 findstr /C:"%EXPECT_C%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
 findstr /C:"%EXPECT_D%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
-findstr /C:"%EXPECT_E%" "%CASE_CONSOLE_LOG%" >nul || goto case_failed
 
 echo [CASE:%CASE_NAME%] [PASS]
 exit /b 0
@@ -133,47 +139,46 @@ echo [CASE:%CASE_NAME%] expected: %EXPECT_A%
 echo [CASE:%CASE_NAME%] expected: %EXPECT_B%
 echo [CASE:%CASE_NAME%] expected: %EXPECT_C%
 echo [CASE:%CASE_NAME%] expected: %EXPECT_D%
-echo [CASE:%CASE_NAME%] expected: %EXPECT_E%
 if exist "%CASE_CONSOLE_LOG%" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%CASE_CONSOLE_LOG%' -Tail 80"
 )
-call :kill_case_pid "%CASE_PID_FILE%"
+call :kill_case_window "%LAUNCH_TITLE%_%CASE_NAME%"
 set /a FAIL_COUNT+=1
 exit /b 0
 
 :wait_case_exit
 set "WAIT_PID_FILE=%~1"
 set /a WAIT_MAX=%~2
-if not exist "%WAIT_PID_FILE%" exit /b 0
-set "WPID="
-for /f "usebackq delims=" %%A in ("%WAIT_PID_FILE%") do (
-  if not defined WPID set "WPID=%%A"
-)
-if not defined WPID exit /b 0
 set /a WAIT_CUR=0
 :wait_case_loop
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$pidValue='%WPID%'; if($pidValue -notmatch '^\d+$'){ exit 0 }; $p=Get-Process -Id ([int]$pidValue) -ErrorAction SilentlyContinue; if($null -eq $p){ exit 0 } else { exit 1 }" >nul 2>nul
-if not errorlevel 1 exit /b 0
+if not exist "%PORT_FILE%" exit /b 0
 ping 127.0.0.1 -n 2 >nul
 set /a WAIT_CUR+=1
 if !WAIT_CUR! geq !WAIT_MAX! (
-  call :kill_case_pid "%WAIT_PID_FILE%"
+  call :kill_case_window "%LAUNCH_TITLE%_%CASE_NAME%"
   exit /b 0
 )
 goto wait_case_loop
 
-:kill_case_pid
-set "KILL_PID_FILE=%~1"
-if not exist "%KILL_PID_FILE%" exit /b 0
-set "KPID="
-for /f "usebackq delims=" %%A in ("%KILL_PID_FILE%") do (
-  if not defined KPID set "KPID=%%A"
+:kill_case_window
+set "KILL_TITLE=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; $t='%KILL_TITLE%'; Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match [regex]::Escape($t) } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
+exit /b 0
+
+:count_bridge_processes
+set "BRIDGE_COUNT_OUTVAR=%~1"
+set "BRIDGE_COUNT_VALUE="
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $root=[IO.Path]::GetFullPath('%ROOT_DIR%'); $n=(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match 'kimodo\.bridge\.bridge_server' -and $_.CommandLine -like ('*'+$root+'*') }).Count; if($null -eq $n){$n=0}; Write-Output $n"`) do (
+  if not defined BRIDGE_COUNT_VALUE set "BRIDGE_COUNT_VALUE=%%I"
 )
-if defined KPID (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='SilentlyContinue'; $pidValue='%KPID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
-)
+if not defined BRIDGE_COUNT_VALUE set "BRIDGE_COUNT_VALUE=0"
+set "%BRIDGE_COUNT_OUTVAR%=%BRIDGE_COUNT_VALUE%"
+exit /b 0
+
+:cleanup_bridge_processes
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; $root=[IO.Path]::GetFullPath('%ROOT_DIR%'); Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match 'kimodo\.bridge\.bridge_server' -and $_.CommandLine -like ('*'+$root+'*') } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
 exit /b 0
 
 :archive_file

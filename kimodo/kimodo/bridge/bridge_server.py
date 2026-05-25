@@ -37,7 +37,27 @@ def _write_text_atomic(path: str, content: str) -> None:
         f.write(content)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp_path, path)
+    for _ in range(30):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    # Fallback for Windows file sharing edge-cases: overwrite directly.
+    for _ in range(30):
+        try:
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    raise PermissionError(f"Failed to write file after retries: {path}")
 
 
 def _out(obj):
@@ -464,7 +484,10 @@ def main():
             with conn:
                 file = conn.makefile("rwb")
                 while not _is_quitting():
-                    line = file.readline()
+                    try:
+                        line = file.readline()
+                    except (ConnectionResetError, BrokenPipeError, OSError):
+                        break
                     if not line:
                         break
 
@@ -564,8 +587,11 @@ def main():
                     finally:
                         _command_finished()
 
-                    file.write((json.dumps(resp) + "\n").encode("utf-8"))
-                    file.flush()
+                    try:
+                        file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                        file.flush()
+                    except (ConnectionResetError, BrokenPipeError, OSError):
+                        break
     finally:
         try:
             server.close()

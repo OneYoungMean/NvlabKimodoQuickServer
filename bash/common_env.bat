@@ -1,5 +1,24 @@
 @echo off
 
+if /I "%~1"==":resolve_venv_python" (
+  shift
+  goto resolve_venv_python
+)
+if /I "%~1"==":archive_file" (
+  shift
+  goto archive_file
+)
+if /I "%~1"==":is_kimodo_bridge_pid" (
+  shift
+  goto is_kimodo_bridge_pid
+)
+if /I "%~1"==":kill_pid_if_kimodo_bridge" (
+  shift
+  goto kill_pid_if_kimodo_bridge
+)
+if /I "%~1"==":eof" exit /b 0
+if "%~1"=="" exit /b 0
+
 :resolve_venv_python
 set "VENV_INPUT=%~1"
 if not defined VENV_INPUT (

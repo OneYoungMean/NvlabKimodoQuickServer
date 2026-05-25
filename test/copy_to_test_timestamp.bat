@@ -26,8 +26,8 @@ if not exist "%TARGET_ROOT%" (
   )
 )
 
-for /f %%I in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Date).ToString('yyyyMMdd_HHmmss')"') do set "TS=%%I"
-set "DEST_DIR=%TARGET_ROOT%\NvlabKimodoQuickServer_%TS%"
+for /f %%I in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Date).ToString('yyyyMMdd_HHmmss_fff')"') do set "TS=%%I"
+set "DEST_DIR=%TARGET_ROOT%\NvlabKimodoQuickServer_%TS%_%RANDOM%%RANDOM%"
 set "DEST_TEST_BAT=%DEST_DIR%\%TEST_BAT_REL%"
 
 mkdir "%DEST_DIR%" >nul 2>nul
@@ -38,13 +38,23 @@ if errorlevel 1 (
 
 echo [INFO] SOURCE=%SOURCE_DIR%
 echo [INFO] DEST=%DEST_DIR%
-echo [STEP] Copying files (excluding .git/recycle)...
+echo [STEP] Exporting committed files from git HEAD...
+git -C "%SOURCE_DIR%" rev-parse --is-inside-work-tree >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] SOURCE is not a git work tree: %SOURCE_DIR%
+  exit /b 1
+)
 
-robocopy "%SOURCE_DIR%" "%DEST_DIR%" /E /R:1 /W:1 /XD ".git" "recycle" /XF ".git" >nul
-set "RBC=%ERRORLEVEL%"
-if %RBC% GEQ 8 (
-  echo [ERROR] Copy failed. robocopy rc=%RBC%
-  exit /b %RBC%
+where tar >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] tar not found in PATH. git archive export requires tar.
+  exit /b 1
+)
+
+git -C "%SOURCE_DIR%" archive --format=tar HEAD | tar -xf - -C "%DEST_DIR%"
+if errorlevel 1 (
+  echo [ERROR] git archive export failed.
+  exit /b 1
 )
 
 echo [OK] Copy complete: %DEST_DIR%

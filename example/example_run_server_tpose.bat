@@ -9,6 +9,8 @@ set "CLIENT_PS1=%SCRIPT_DIR%\example_run_server_tpose_client.ps1"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "PID_FILE=%ROOT_DIR%\log\example_run_server_tpose.pid"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
+set "WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%"
+if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=30"
 
 set "MODEL=Kimodo-SOMA-RP-v1"
 if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
@@ -44,11 +46,19 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "%PORT_FILE%" (
-  echo [ERROR] serverport missing: %PORT_FILE%
+set /a WAIT_SEC=0
+:wait_serverport
+if exist "%PORT_FILE%" goto got_serverport
+ping 127.0.0.1 -n 2 >nul
+set /a WAIT_SEC+=1
+if !WAIT_SEC! geq %WAIT_TIMEOUT_SEC% (
+  echo [ERROR] serverport missing after !WAIT_SEC!s: %PORT_FILE%
   call :kill_pid
   exit /b 1
 )
+goto wait_serverport
+
+:got_serverport
 set "HOST="
 set "PORT="
 for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (

@@ -34,6 +34,8 @@ call :archive_file "%PID_FILE%"
 call :archive_file "%BRIDGE_LOG%"
 call :archive_file "%BOOTSTRAP_LOG%"
 call :archive_file "%PORT_FILE%"
+set "RUN_WRAPPER=%LOG_DIR%\test_multi_start_wrapper.bat"
+set "RUN_WINDOW_TITLE=KIMODO_TEST_MULTI_START"
 
 echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODELS_ROOT=%MODELS_ROOT%
@@ -147,12 +149,16 @@ echo [CASE] repeated start #%RUN_IDX% pass.
 exit /b 0
 
 :start_server_background
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $root='%ROOT_DIR%'; $pidFile='%PID_FILE%'; $bridgeLog='%BRIDGE_LOG%'; $args=@('/d','/c','run_server.bat','--model','Kimodo-SOMA-RP-v1','--models-root','%MODELS_ROOT%','--output','file','--log',$bridgeLog); if('%VENV_PATH%' -ne ''){ $args += @('--venv','%VENV_PATH%') }; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory $root -PassThru; Set-Content -LiteralPath $pidFile -Value $p.Id -Encoding ASCII"
-if errorlevel 1 (
-  echo [ERROR] failed to start background server.
-  exit /b 1
+> "%RUN_WRAPPER%" (
+  echo @echo off
+  echo cd /d "%ROOT_DIR%"
+  if defined VENV_PATH (
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --venv "%VENV_PATH%" --output file --log "%BRIDGE_LOG%"
+  ) else (
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%BRIDGE_LOG%"
+  )
 )
+start "%RUN_WINDOW_TITLE%" cmd /k call "%RUN_WRAPPER%"
 exit /b 0
 
 :wait_server_responding
@@ -246,16 +252,11 @@ if !WAIT_CUR! geq !WAIT_MAX! (
 goto wait_exit_loop
 
 :kill_server_by_pidfile
-if not exist "%PID_FILE%" exit /b 0
-set "KPID="
-for /f "usebackq delims=" %%A in ("%PID_FILE%") do (
-  if not defined KPID set "KPID=%%A"
-)
-if defined KPID (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='SilentlyContinue'; $pidValue='%KPID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
-)
-call :archive_file "%PID_FILE%"
+if exist "%PID_FILE%" call :archive_file "%PID_FILE%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; $root=(Resolve-Path -LiteralPath '%ROOT_DIR%').Path; $pat=[regex]::Escape($root); Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match 'kimodo\\.bridge\\.bridge_server' -and $_.CommandLine -match $pat } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match [regex]::Escape('%RUN_WRAPPER%') } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
 exit /b 0
 
 :archive_file
