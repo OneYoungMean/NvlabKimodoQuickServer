@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$PythonPath,
     [Parameter(Mandatory = $true)][string]$RootDir,
     [Parameter(Mandatory = $true)][string]$ModelName,
+    [Parameter(Mandatory = $false)][string]$Device,
     [Parameter(Mandatory = $true)][string]$WindowStyle,
     [Parameter(Mandatory = $true)][string]$BridgeLogPath,
     [Parameter(Mandatory = $true)][string]$BridgeMessageLogPath,
@@ -24,6 +25,9 @@ $args = @(
     "--kimodo-root",
     $RootDir
 )
+if (-not [string]::IsNullOrWhiteSpace($Device)) {
+    $args += @("--device", $Device)
+}
 
 $env:KIMODO_BRIDGE_LOG = $BridgeLogPath
 $workingDir = Split-Path -Parent $PidFile

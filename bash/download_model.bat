@@ -174,6 +174,8 @@ if "!INJECT_ONCE!"=="1" (
 
 if "%FORCE_SYNC%"=="0" if exist "%DEST_DIR%\%REQ_FILE%" (
   echo [INFO] Skip existing model: %DEST_DIR%
+  call :validate_repo_safetensors "%DEST_DIR%" "%REQ_FILE%" "%LFS_INCLUDE%"
+  if errorlevel 1 exit /b 1
   call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
   exit /b 0
 )
@@ -220,6 +222,8 @@ if not exist "%DEST_DIR%\%REQ_FILE%" (
   echo [ERROR] Missing %REQ_FILE% after sync: %DEST_DIR%
   exit /b 1
 )
+call :validate_repo_safetensors "%DEST_DIR%" "%REQ_FILE%" "%LFS_INCLUDE%"
+if errorlevel 1 exit /b 1
 call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
 exit /b 0
 
@@ -261,6 +265,51 @@ if exist "%REPO_DIR%\model.safetensors" (
   exit /b 0
 )
 call :backup_dir "%REPO_DIR%" || exit /b 1
+exit /b 0
+
+:validate_repo_safetensors
+set "VAL_DEST_DIR=%~1"
+set "VAL_REQ_FILE=%~2"
+set "VAL_LFS_INCLUDE=%~3"
+set "VAL_TARGET=%VAL_DEST_DIR%\%VAL_REQ_FILE%"
+if /I not "%VAL_REQ_FILE:~-12%"==".safetensors" exit /b 0
+if not exist "%VAL_TARGET%" exit /b 0
+
+call :validate_safetensor "%VAL_TARGET%"
+if not errorlevel 1 exit /b 0
+
+echo [WARN] Corrupted safetensor detected: %VAL_TARGET%
+if exist "%VAL_TARGET%" (
+  set "VAL_BROKEN=%VAL_TARGET%.broken.%RANDOM%%RANDOM%"
+  move "%VAL_TARGET%" "%VAL_BROKEN%" >nul
+  if errorlevel 1 (
+    echo [ERROR] Failed to archive corrupted safetensor: %VAL_TARGET%
+    exit /b 1
+  )
+  echo [WARN] Archived corrupted safetensor: %VAL_BROKEN%
+)
+git -C "%VAL_DEST_DIR%" checkout HEAD -- "%VAL_REQ_FILE%"
+if errorlevel 1 exit /b 1
+git -C "%VAL_DEST_DIR%" lfs pull --include="%VAL_LFS_INCLUDE%"
+if errorlevel 1 exit /b 1
+if not exist "%VAL_TARGET%" (
+  echo [ERROR] Missing %VAL_REQ_FILE% after repair sync: %VAL_DEST_DIR%
+  exit /b 1
+)
+call :validate_safetensor "%VAL_TARGET%"
+if errorlevel 1 (
+  echo [ERROR] safetensors validation still failed after one-time repair: %VAL_TARGET%
+  exit /b 1
+)
+echo [OK] safetensors repaired: %VAL_TARGET%
+exit /b 0
+
+:validate_safetensor
+set "VAL_FILE=%~1"
+if not exist "%VAL_FILE%" exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop'; $f='%VAL_FILE%'; $fs=[IO.File]::Open($f,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { $buf=New-Object byte[] 8; $read=$fs.Read($buf,0,8); if($read -lt 8){ throw 'short-header' }; $len=[BitConverter]::ToUInt64($buf,0); if($len -le 0 -or $len -gt 104857600){ throw ('invalid-header-length:' + $len) } } finally { $fs.Close() }" >nul 2>nul
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :rotate_lock
