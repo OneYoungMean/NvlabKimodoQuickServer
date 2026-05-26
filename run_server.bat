@@ -166,6 +166,10 @@ if not exist "%COMMON_ENV_BAT%" (
   echo [ERROR] Missing common env script: %COMMON_ENV_BAT%
   exit /b 1
 )
+if exist "%SETUP_LOCK%" (
+  echo [WARN] Found stale setup lock, archiving: %SETUP_LOCK%
+  call "%COMMON_ENV_BAT%" :archive_file "%SETUP_LOCK%" "%RECYCLE_DIR%"
+)
 call "%RESOLVE_MODEL_ALIAS_BAT%" "%MODEL_NAME%"
 if errorlevel 1 exit /b 1
 set "MODEL_RUN_NAME=%MODEL_NAME%"

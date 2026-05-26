@@ -74,11 +74,16 @@ try {
             }
             continue
         }
-        Write-Output $line
         $obj = $line | ConvertFrom-Json
         if ($obj.status -eq "error") {
+            Write-Output $line
             try { Send-Line -Writer $writer -Obj @{ cmd = "quit" } } catch {}
             throw ("Bridge generate error: " + $line)
+        }
+        if ($obj.status -eq "done") {
+            Write-Output '{"status":"done"}'
+        } else {
+            Write-Output $line
         }
         if ($obj.status -eq "done") {
             $done = $true

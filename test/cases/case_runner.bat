@@ -70,10 +70,27 @@ if /I "%CASE_NAME%"=="setup_not_started" (
   if exist "%RUN_ROOT%\.setup.complete" move "%RUN_ROOT%\.setup.complete" "%RUN_ROOT%\archive\recycle\.setup.complete.%RANDOM%" >nul 2>nul
 )
 
-set "KIMODO_TEST_WAIT_TIMEOUT_SEC=900"
+set "RUN1_WAIT_TIMEOUT_SEC=%KIMODO_TEST_RUN1_WAIT_TIMEOUT_SEC%"
+set "RUN2_WAIT_TIMEOUT_SEC=%KIMODO_TEST_RUN2_WAIT_TIMEOUT_SEC%"
+if not defined RUN2_WAIT_TIMEOUT_SEC set "RUN2_WAIT_TIMEOUT_SEC=600"
+if not defined RUN1_WAIT_TIMEOUT_SEC (
+  if "%EXPECT_FAIL_RUN1%"=="1" (
+    set "RUN1_WAIT_TIMEOUT_SEC=180"
+  ) else (
+    set "RUN1_WAIT_TIMEOUT_SEC=%RUN2_WAIT_TIMEOUT_SEC%"
+  )
+)
+
+set "KIMODO_TEST_WAIT_TIMEOUT_SEC=%RUN1_WAIT_TIMEOUT_SEC%"
 set "KIMODO_TEST_OUTPUT=file"
 set "KIMODO_TEST_SERVER_WINDOW_STYLE=Normal"
-set "KIMODO_TEST_MODELS_ROOT=%TEST_MODELS_ROOT%"
+if "%USE_SHARED%"=="1" (
+  set "KIMODO_TEST_MODELS_ROOT=%TEST_MODELS_ROOT%"
+  set "KIMODO_MODELS_ROOT=%TEST_MODELS_ROOT%"
+) else (
+  set "KIMODO_TEST_MODELS_ROOT="
+  set "KIMODO_MODELS_ROOT="
+)
 set "KIMODO_TEST_HIGHVRAM=%HIGHVRAM%"
 set "KIMODO_TEST_USE_SHARED_MODELS=%USE_SHARED%"
 if defined MODEL_NAME set "KIMODO_TEST_MODEL=%MODEL_NAME%"
@@ -86,6 +103,8 @@ popd >nul
 
 if defined INJECT_VAR set "%INJECT_VAR%="
 
+set "KIMODO_TEST_WAIT_TIMEOUT_SEC=%RUN2_WAIT_TIMEOUT_SEC%"
+
 set "RUN1_OK=0"
 if "%RC1%"=="0" set "RUN1_OK=1"
 if "%EXPECT_FAIL_RUN1%"=="1" (
@@ -96,6 +115,37 @@ if "%EXPECT_FAIL_RUN1%"=="1" (
   if not "%RUN1_OK%"=="1" (
     call :write_result FAIL "run1_unexpected_fail_rc_%RC1%"
     exit /b 1
+  )
+)
+
+if "%EXPECT_FAIL_RUN1%"=="1" (
+  if exist "%RUN_ROOT%\bash\setup.bat" (
+    if not exist "%RUN_ROOT%\archive\recycle" mkdir "%RUN_ROOT%\archive\recycle" >nul 2>nul
+    if exist "%RUN_ROOT%\.setup.lock" (
+      move "%RUN_ROOT%\.setup.lock" "%RUN_ROOT%\archive\recycle\.setup.lock.recover.%RANDOM%%RANDOM%" >nul 2>nul
+    )
+    if exist "%RUN_ROOT%\log\example_run_server_tpose.pid" (
+      set "RECOVER_PID="
+      for /f "usebackq delims=" %%P in ("%RUN_ROOT%\log\example_run_server_tpose.pid") do (
+        if not defined RECOVER_PID set "RECOVER_PID=%%P"
+      )
+      if defined RECOVER_PID (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+          "$ErrorActionPreference='SilentlyContinue'; $pidValue='%RECOVER_PID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
+      )
+    )
+    if exist "%RUN_ROOT%\serverport" (
+      powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$ErrorActionPreference='SilentlyContinue'; Remove-Item -LiteralPath '%RUN_ROOT%\\serverport' -Force -ErrorAction SilentlyContinue" >nul 2>nul
+    )
+    pushd "%RUN_ROOT%" >nul
+    call "%RUN_ROOT%\bash\setup.bat" --force --output file --log "%RUN_ROOT%\log\setup.log"
+    set "RECOVER_SETUP_RC=!ERRORLEVEL!"
+    popd >nul
+    if not "!RECOVER_SETUP_RC!"=="0" (
+      call :write_result FAIL "recover_setup_failed_rc_!RECOVER_SETUP_RC!"
+      exit /b 1
+    )
   )
 )
 

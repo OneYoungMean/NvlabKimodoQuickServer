@@ -64,6 +64,7 @@ set "PYTHON_SPEC="
 set "INJECT_ONCE=0"
 set "SETUP_DEVICE=%KIMODO_SETUP_DEVICE%"
 if not defined SETUP_DEVICE set "SETUP_DEVICE=cuda"
+set "BITSANDBYTES_REQUIRED=0.49.2"
 
 if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
 
@@ -206,7 +207,22 @@ if /I "%SETUP_DEVICE%"=="cpu" (
     echo [ERROR] CPU torch runtime validation failed.
     exit /b 1
   )
-  echo [INFO] CPU mode selected, skip bitsandbytes install.
+  echo [STEP] Ensuring bitsandbytes on CPU path...
+  "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)" >nul 2>nul
+  if errorlevel 1 (
+    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes==%BITSANDBYTES_REQUIRED%"
+    if errorlevel 1 (
+      echo [ERROR] Failed to install bitsandbytes on CPU mode.
+      exit /b 1
+    )
+    "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)"
+    if errorlevel 1 (
+      echo [ERROR] bitsandbytes version check failed after CPU-mode install.
+      exit /b 1
+    )
+  ) else (
+    echo [INFO] bitsandbytes>=0.46.1 already present, skip reinstall.
+  )
 ) else (
   echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
   "%VENV_PY%" -m torchruntime install torch torchvision torchaudio
@@ -215,15 +231,20 @@ if /I "%SETUP_DEVICE%"=="cpu" (
     exit /b 1
   )
   echo [STEP] Ensuring bitsandbytes for 4-bit quantization...
-  "%VENV_PY%" -c "import bitsandbytes as bnb; print(getattr(bnb, '__version__', 'unknown'))" >nul 2>nul
+  "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)" >nul 2>nul
   if errorlevel 1 (
-    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes>=0.46.1"
+    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes==%BITSANDBYTES_REQUIRED%"
     if errorlevel 1 (
       echo [ERROR] Failed to install bitsandbytes.
       exit /b 1
     )
+    "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)"
+    if errorlevel 1 (
+      echo [ERROR] bitsandbytes version check failed after install.
+      exit /b 1
+    )
   ) else (
-    echo [INFO] bitsandbytes already present, skip reinstall.
+    echo [INFO] bitsandbytes>=0.46.1 already present, skip reinstall.
   )
 )
 

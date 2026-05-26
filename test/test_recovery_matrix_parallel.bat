@@ -21,7 +21,7 @@ if not exist "%RESULT_DIR%" mkdir "%RESULT_DIR%" >nul 2>nul
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
 > "%MATRIX_LOG%" echo [MATRIX] start %DATE% %TIME%
-call :log "[MATRIX] mode=serial timeout_sec=600 visible_windows=on"
+call :log "[MATRIX] mode=serial timeout_run1_sec=180 timeout_run2_sec=600 visible_windows=on"
 if defined ONLY_SCENARIO call :log "[MATRIX] only_scenario=%ONLY_SCENARIO%"
 
 set "CASE_LIST=case_download_interrupt_once case_download_network_bad_once case_download_then_model_missing_once case_setup_interrupt_once case_setup_network_bad_once case_setup_not_started case_highvram_soma case_model_variant_g1_rp case_model_variant_smplx_rp case_model_variant_soma_seed case_local_tools_uv_git"

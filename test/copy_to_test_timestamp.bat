@@ -38,22 +38,32 @@ if errorlevel 1 (
 
 echo [INFO] SOURCE=%SOURCE_DIR%
 echo [INFO] DEST=%DEST_DIR%
-echo [STEP] Exporting committed files from git HEAD...
+echo [STEP] Exporting git-tracked files from working tree...
 git -C "%SOURCE_DIR%" rev-parse --is-inside-work-tree >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] SOURCE is not a git work tree: %SOURCE_DIR%
   exit /b 1
 )
 
-where tar >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] tar not found in PATH. git archive export requires tar.
-  exit /b 1
+pushd "%SOURCE_DIR%" >nul
+for /f "usebackq delims=" %%F in (`git ls-files`) do (
+  if not "%%F"=="" (
+    set "REL=%%F"
+    set "REL=!REL:/=\!"
+    for %%P in ("%DEST_DIR%\!REL!") do (
+      if not exist "%%~dpP" mkdir "%%~dpP" >nul 2>nul
+    )
+    copy /Y "!REL!" "%DEST_DIR%\!REL!" >nul
+    if errorlevel 1 (
+      popd >nul
+      echo [ERROR] Failed to copy tracked file: %%F
+      exit /b 1
+    )
+  )
 )
-
-git -C "%SOURCE_DIR%" archive --format=tar HEAD | tar -xf - -C "%DEST_DIR%"
+popd >nul
 if errorlevel 1 (
-  echo [ERROR] git archive export failed.
+  echo [ERROR] tracked file export failed.
   exit /b 1
 )
 
