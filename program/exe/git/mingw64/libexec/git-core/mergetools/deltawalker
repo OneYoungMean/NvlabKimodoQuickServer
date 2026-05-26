@@ -2,6 +2,10 @@ diff_cmd () {
 	"$merge_tool_path" "$LOCAL" "$REMOTE" >/dev/null 2>&1
 }
 
+diff_cmd_help () {
+	echo "Use DeltaWalker (requires a graphical session)"
+}
+
 merge_cmd () {
 	# Adding $(pwd)/ in front of $MERGED should not be necessary.
 	# However without it, DeltaWalker (at least v1.9.8 on Windows)
@@ -16,6 +20,14 @@ merge_cmd () {
 	fi >/dev/null 2>&1
 }
 
-translate_merge_tool_path() {
+merge_cmd_help () {
+	echo "Use DeltaWalker (requires a graphical session)"
+}
+
+translate_merge_tool_path () {
 	echo DeltaWalker
+}
+
+exit_code_trustable () {
+	true
 }

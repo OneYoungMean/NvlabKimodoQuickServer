@@ -4,6 +4,10 @@ diff_cmd () {
 		"$LOCAL" "$REMOTE" >/dev/null 2>&1
 }
 
+diff_cmd_help () {
+	echo "Use KDiff3 (requires a graphical session)"
+}
+
 merge_cmd () {
 	if $base_present
 	then
@@ -19,5 +23,22 @@ merge_cmd () {
 			--L2 "$MERGED (Remote)" \
 			-o "$MERGED" "$LOCAL" "$REMOTE" \
 		>/dev/null 2>&1
+	fi
+}
+
+merge_cmd_help () {
+	echo "Use KDiff3 (requires a graphical session)"
+}
+
+exit_code_trustable () {
+	true
+}
+
+translate_merge_tool_path() {
+	if type kdiff3 >/dev/null 2>/dev/null
+	then
+		echo kdiff3
+	else
+		mergetool_find_win32_cmd "kdiff3.exe" "Kdiff3"
 	fi
 }

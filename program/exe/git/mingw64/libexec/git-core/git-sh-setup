@@ -56,15 +56,6 @@ die_with_status () {
 	exit "$status"
 }
 
-GIT_QUIET=
-
-say () {
-	if test -z "$GIT_QUIET"
-	then
-		printf '%s\n' "$*"
-	fi
-}
-
 if test -n "$OPTIONS_SPEC"; then
 	usage() {
 		"$0" -h
@@ -171,14 +162,6 @@ git_pager() {
 	eval "$GIT_PAGER" '"$@"'
 }
 
-sane_grep () {
-	GREP_OPTIONS= LC_ALL=C grep  "$@"
-}
-
-sane_egrep () {
-	GREP_OPTIONS= LC_ALL=C egrep  "$@"
-}
-
 is_bare_repository () {
 	git rev-parse --is-bare-repository
 }
@@ -195,14 +178,14 @@ require_work_tree_exists () {
 	if test "z$(git rev-parse --is-bare-repository)" != zfalse
 	then
 		program_name=$0
-		die "$(gettext "fatal: \$program_name cannot be used without a working tree.")"
+		die "$(eval_gettext "fatal: \$program_name cannot be used without a working tree.")"
 	fi
 }
 
 require_work_tree () {
 	test "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true || {
 		program_name=$0
-		die "$(gettext "fatal: \$program_name cannot be used without a working tree.")"
+		die "$(eval_gettext "fatal: \$program_name cannot be used without a working tree.")"
 	}
 }
 
@@ -215,14 +198,8 @@ require_clean_work_tree () {
 	then
 		action=$1
 		case "$action" in
-		rebase)
-			gettextln "Cannot rebase: You have unstaged changes." >&2
-			;;
 		"rewrite branches")
 			gettextln "Cannot rewrite branches: You have unstaged changes." >&2
-			;;
-		"pull with rebase")
-			gettextln "Cannot pull with rebase: You have unstaged changes." >&2
 			;;
 		*)
 			eval_gettextln "Cannot \$action: You have unstaged changes." >&2
@@ -236,17 +213,7 @@ require_clean_work_tree () {
 		if test $err = 0
 		then
 			action=$1
-			case "$action" in
-			rebase)
-				gettextln "Cannot rebase: Your index contains uncommitted changes." >&2
-				;;
-			"pull with rebase")
-				gettextln "Cannot pull with rebase: Your index contains uncommitted changes." >&2
-				;;
-			*)
-				eval_gettextln "Cannot \$action: Your index contains uncommitted changes." >&2
-				;;
-			esac
+			eval_gettextln "Cannot \$action: Your index contains uncommitted changes." >&2
 		else
 		    gettextln "Additionally, your index contains uncommitted changes." >&2
 		fi
@@ -308,13 +275,6 @@ get_author_ident_from_commit () {
 	parse_ident_from_commit author AUTHOR
 }
 
-# Clear repo-local GIT_* environment variables. Useful when switching to
-# another repository (e.g. when entering a submodule). See also the env
-# list in git_connect()
-clear_local_git_env() {
-	unset $(git rev-parse --local-env-vars)
-}
-
 # Generate a virtual base file for a two-file merge. Uses git apply to
 # remove lines from $1 that are not in $2, leaving only common lines.
 create_virtual_base() {
@@ -331,17 +291,30 @@ create_virtual_base() {
 # Platform specific tweaks to work around some commands
 case $(uname -s) in
 *MINGW*)
-	# Windows has its own (incompatible) sort and find
-	sort () {
-		/usr/bin/sort "$@"
-	}
-	find () {
-		/usr/bin/find "$@"
-	}
-	# git sees Windows-style pwd
-	pwd () {
-		builtin pwd -W
-	}
+	if test -x /usr/bin/sort
+	then
+		# Windows has its own (incompatible) sort; override
+		sort () {
+			/usr/bin/sort "$@"
+		}
+	fi
+	if test -x /usr/bin/find
+	then
+		# Windows has its own (incompatible) find; override
+		find () {
+			/usr/bin/find "$@"
+		}
+	fi
+	# On Windows, Git wants Windows paths. But /usr/bin/pwd spits out
+	# Unix-style paths. At least in Bash, we have a builtin pwd that
+	# understands the -W option to force "mixed" paths, i.e. with drive
+	# prefix but still with forward slashes. Let's use that, if available.
+	if type builtin >/dev/null 2>&1
+	then
+		pwd () {
+			builtin pwd -W
+		}
+	fi
 	is_absolute_path () {
 		case "$1" in
 		[/\\]* | [A-Za-z]:*)

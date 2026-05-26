@@ -2,8 +2,11 @@ diff_cmd () {
 	"$merge_tool_path" "$LOCAL" "$REMOTE"
 }
 
+diff_cmd_help () {
+	echo "Use Code Compare (requires a graphical session)"
+}
+
 merge_cmd () {
-	touch "$BACKUP"
 	if $base_present
 	then
 		"$merge_tool_path" -MF="$LOCAL" -TF="$REMOTE" -BF="$BASE" \
@@ -12,7 +15,10 @@ merge_cmd () {
 		"$merge_tool_path" -MF="$LOCAL" -TF="$REMOTE" \
 			-RF="$MERGED"
 	fi
-	check_unchanged
+}
+
+merge_cmd_help () {
+	echo "Use Code Compare (requires a graphical session)"
 }
 
 translate_merge_tool_path() {
