@@ -74,25 +74,22 @@ if errorlevel 1 (
 echo [STEP] Copying local portable runtimes...
 if exist "%SOURCE_DIR%\program\exe\git" (
   robocopy "%SOURCE_DIR%\program\exe\git" "%DEST_DIR%\program\exe\git" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
-  set "RC=!ERRORLEVEL!"
-  if !RC! GEQ 8 (
-    echo [ERROR] Failed to copy runtime: program\exe\git (robocopy rc=!RC!)
+  if errorlevel 8 (
+    echo [ERROR] Failed to copy runtime: program\exe\git, robocopy rc=%ERRORLEVEL%
     exit /b 1
   )
 )
 if exist "%SOURCE_DIR%\program\exe\uv" (
   robocopy "%SOURCE_DIR%\program\exe\uv" "%DEST_DIR%\program\exe\uv" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
-  set "RC=!ERRORLEVEL!"
-  if !RC! GEQ 8 (
-    echo [ERROR] Failed to copy runtime: program\exe\uv (robocopy rc=!RC!)
+  if errorlevel 8 (
+    echo [ERROR] Failed to copy runtime: program\exe\uv, robocopy rc=%ERRORLEVEL%
     exit /b 1
   )
 )
 if exist "%SOURCE_DIR%\program\exe\llama" (
   robocopy "%SOURCE_DIR%\program\exe\llama" "%DEST_DIR%\program\exe\llama" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
-  set "RC=!ERRORLEVEL!"
-  if !RC! GEQ 8 (
-    echo [ERROR] Failed to copy runtime: program\exe\llama (robocopy rc=!RC!)
+  if errorlevel 8 (
+    echo [ERROR] Failed to copy runtime: program\exe\llama, robocopy rc=%ERRORLEVEL%
     exit /b 1
   )
 )
