@@ -4,7 +4,6 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "TEST_DIR=%SCRIPT_DIR%\.."
-for %%I in ("%TEST_DIR%\..") do set "SOURCE_ROOT=%%~fI"
 set "COPY_BAT=%TEST_DIR%\copy_to_test_timestamp.bat"
 set "DEST_INFO_FILE=%TEMP%\kimodo_case_dest_%RANDOM%%RANDOM%.txt"
 
@@ -92,7 +91,6 @@ if "%USE_SHARED%"=="1" (
   set "KIMODO_MODELS_ROOT="
 )
 set "KIMODO_TEST_HIGHVRAM=%HIGHVRAM%"
-set "KIMODO_TEST_USE_SHARED_MODELS=%USE_SHARED%"
 if defined MODEL_NAME set "KIMODO_TEST_MODEL=%MODEL_NAME%"
 if defined INJECT_VAR if defined INJECT_VAL set "%INJECT_VAR%=%INJECT_VAL%"
 
@@ -135,8 +133,7 @@ if "%EXPECT_FAIL_RUN1%"=="1" (
       )
     )
     if exist "%RUN_ROOT%\serverport" (
-      powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$ErrorActionPreference='SilentlyContinue'; Remove-Item -LiteralPath '%RUN_ROOT%\\serverport' -Force -ErrorAction SilentlyContinue" >nul 2>nul
+      move "%RUN_ROOT%\serverport" "%RUN_ROOT%\archive\recycle\serverport.recover.%RANDOM%%RANDOM%" >nul 2>nul
     )
     pushd "%RUN_ROOT%" >nul
     call "%RUN_ROOT%\bash\setup.bat" --force --output file --log "%RUN_ROOT%\log\setup.log"

@@ -55,6 +55,8 @@ set "UV_BIN=%ROOT_DIR%\program\exe\uv\uv.exe"
 set "UV_DEFAULT_INDEX=https://pypi.org/simple"
 set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
 set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
+set "UV_CACHE_DIR=%ROOT_DIR%\archive\uv_cache"
+set "UV_PYTHON_INSTALL_DIR=%ROOT_DIR%\archive\uv_python"
 set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
 set "NETWORK_PROBE_TIMEOUT_SEC=%KIMODO_NETWORK_PROBE_TIMEOUT_SEC%"
 if not defined NETWORK_PROBE_TIMEOUT_SEC set "NETWORK_PROBE_TIMEOUT_SEC=1"
@@ -75,6 +77,10 @@ if errorlevel 1 (
   echo [ERROR] Docs: https://docs.astral.sh/uv/getting-started/installation/
   exit /b 1
 )
+if not exist "%UV_CACHE_DIR%" mkdir "%UV_CACHE_DIR%" >nul 2>nul
+set "UV_CACHE_DIR=%UV_CACHE_DIR%"
+if not exist "%UV_PYTHON_INSTALL_DIR%" mkdir "%UV_PYTHON_INSTALL_DIR%" >nul 2>nul
+set "UV_PYTHON_INSTALL_DIR=%UV_PYTHON_INSTALL_DIR%"
 call :ensure_local_git_lfs
 if errorlevel 1 (
   echo [ERROR] local git/git-lfs check failed.
@@ -207,22 +213,8 @@ if /I "%SETUP_DEVICE%"=="cpu" (
     echo [ERROR] CPU torch runtime validation failed.
     exit /b 1
   )
-  echo [STEP] Ensuring bitsandbytes on CPU path...
-  "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)" >nul 2>nul
-  if errorlevel 1 (
-    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes==%BITSANDBYTES_REQUIRED%"
-    if errorlevel 1 (
-      echo [ERROR] Failed to install bitsandbytes on CPU mode.
-      exit /b 1
-    )
-    "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)"
-    if errorlevel 1 (
-      echo [ERROR] bitsandbytes version check failed after CPU-mode install.
-      exit /b 1
-    )
-  ) else (
-    echo [INFO] bitsandbytes>=0.46.1 already present, skip reinstall.
-  )
+  call :ensure_bitsandbytes "CPU mode"
+  if errorlevel 1 exit /b 1
 ) else (
   echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
   "%VENV_PY%" -m torchruntime install torch torchvision torchaudio
@@ -230,22 +222,8 @@ if /I "%SETUP_DEVICE%"=="cpu" (
     echo [ERROR] torchruntime failed to install CUDA-enabled torch packages.
     exit /b 1
   )
-  echo [STEP] Ensuring bitsandbytes for 4-bit quantization...
-  "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)" >nul 2>nul
-  if errorlevel 1 (
-    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes==%BITSANDBYTES_REQUIRED%"
-    if errorlevel 1 (
-      echo [ERROR] Failed to install bitsandbytes.
-      exit /b 1
-    )
-    "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)"
-    if errorlevel 1 (
-      echo [ERROR] bitsandbytes version check failed after install.
-      exit /b 1
-    )
-  ) else (
-    echo [INFO] bitsandbytes>=0.46.1 already present, skip reinstall.
-  )
+  call :ensure_bitsandbytes "CUDA mode"
+  if errorlevel 1 exit /b 1
 )
 
 echo [STEP] Ensuring motion_correction...
@@ -374,6 +352,26 @@ if /I "%KIMODO_PYTHON_ARCH%"=="x86" (
 )
 set "PYTHON_SPEC=cpython-3.12.13-windows-x86_64-none"
 echo [INFO] Python arch selected: x64 ^(required by torch wheels on Windows^).
+exit /b 0
+
+:ensure_bitsandbytes
+set "BNB_CONTEXT=%~1"
+echo [STEP] Ensuring bitsandbytes for %BNB_CONTEXT%...
+"%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)" >nul 2>nul
+if errorlevel 1 (
+  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes==%BITSANDBYTES_REQUIRED%"
+  if errorlevel 1 (
+    echo [ERROR] Failed to install bitsandbytes for %BNB_CONTEXT%.
+    exit /b 1
+  )
+  "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)"
+  if errorlevel 1 (
+    echo [ERROR] bitsandbytes version check failed after install for %BNB_CONTEXT%.
+    exit /b 1
+  )
+) else (
+  echo [INFO] bitsandbytes>=0.46.1 already present, skip reinstall.
+)
 exit /b 0
 
 

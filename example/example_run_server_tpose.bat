@@ -59,23 +59,13 @@ call :archive_file "%PORT_FILE%"
 call :archive_file "%PID_FILE%"
 call :archive_file "%SERVER_LOG%"
 
-if defined MODELS_ROOT (
-  if "%USE_VENV_ARG%"=="1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%','--models-root','%MODELS_ROOT%','--venv','%VENV_PATH%','--output','file','--log','%SERVER_LOG%'); $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
-  ) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%','--models-root','%MODELS_ROOT%','--output','file','--log','%SERVER_LOG%'); $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
-  )
-) else (
-  if "%USE_VENV_ARG%"=="1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%','--venv','%VENV_PATH%','--output','file','--log','%SERVER_LOG%'); $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
-  ) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%','--output','file','--log','%SERVER_LOG%'); $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
-  )
-)
+set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%');"
+if defined MODELS_ROOT set "LAUNCH_PS_CMD=!LAUNCH_PS_CMD! $args += @('--models-root','%MODELS_ROOT%');"
+if "%USE_VENV_ARG%"=="1" set "LAUNCH_PS_CMD=!LAUNCH_PS_CMD! $args += @('--venv','%VENV_PATH%');"
+set "LAUNCH_PS_CMD=!LAUNCH_PS_CMD! $args += @('--output','file','--log','%SERVER_LOG%');"
+set "LAUNCH_PS_CMD=!LAUNCH_PS_CMD! $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "!LAUNCH_PS_CMD!"
 if errorlevel 1 (
   echo [ERROR] failed to launch run_server.
   exit /b 1
