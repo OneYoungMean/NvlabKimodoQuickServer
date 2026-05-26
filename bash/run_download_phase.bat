@@ -20,10 +20,12 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
 )
 
 echo [STEP] Downloading model assets for model=%MODEL_NAME% highvram=%HIGHVRAM%...
+set "GGUF_ARG="
+if /I "%KIMODO_DOWNLOAD_GGUF%"=="1" set "GGUF_ARG=--download-gguf"
 if "%HIGHVRAM%"=="1" (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%DOWNLOAD_LOG_PATH%" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%DOWNLOAD_LOG_PATH%" --unlock-stale --model "%MODEL_RUN_NAME%" --highvram %GGUF_ARG%
 ) else (
-  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%DOWNLOAD_LOG_PATH%" --unlock-stale --model "%MODEL_RUN_NAME%"
+  call "%DOWNLOAD_BAT%" --output "%OUTPUT_MODE%" --log "%DOWNLOAD_LOG_PATH%" --unlock-stale --model "%MODEL_RUN_NAME%" %GGUF_ARG%
 )
 if errorlevel 1 exit /b 1
 

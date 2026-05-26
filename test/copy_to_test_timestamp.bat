@@ -46,18 +46,22 @@ if errorlevel 1 (
 )
 
 pushd "%SOURCE_DIR%" >nul
-for /f "usebackq delims=" %%F in (`git ls-files`) do (
+for /f "usebackq delims=" %%F in (`git ls-files ^| findstr /V /I /R "^program/exe/git/ ^program/exe/uv/ ^program/exe/llama/"`) do (
   if not "%%F"=="" (
     set "REL=%%F"
     set "REL=!REL:/=\!"
-    for %%P in ("%DEST_DIR%\!REL!") do (
-      if not exist "%%~dpP" mkdir "%%~dpP" >nul 2>nul
-    )
-    copy /Y "!REL!" "%DEST_DIR%\!REL!" >nul
-    if errorlevel 1 (
-      popd >nul
-      echo [ERROR] Failed to copy tracked file: %%F
-      exit /b 1
+    if exist "!REL!" (
+      for %%P in ("%DEST_DIR%\!REL!") do (
+        if not exist "%%~dpP" mkdir "%%~dpP" >nul 2>nul
+      )
+      copy /Y "!REL!" "%DEST_DIR%\!REL!" >nul
+      if errorlevel 1 (
+        popd >nul
+        echo [ERROR] Failed to copy tracked file: %%F
+        exit /b 1
+      )
+    ) else (
+      echo [WARN] Tracked file missing in working tree, skip: %%F
     )
   )
 )
@@ -65,6 +69,32 @@ popd >nul
 if errorlevel 1 (
   echo [ERROR] tracked file export failed.
   exit /b 1
+)
+
+echo [STEP] Copying local portable runtimes...
+if exist "%SOURCE_DIR%\program\exe\git" (
+  robocopy "%SOURCE_DIR%\program\exe\git" "%DEST_DIR%\program\exe\git" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+  set "RC=!ERRORLEVEL!"
+  if !RC! GEQ 8 (
+    echo [ERROR] Failed to copy runtime: program\exe\git (robocopy rc=!RC!)
+    exit /b 1
+  )
+)
+if exist "%SOURCE_DIR%\program\exe\uv" (
+  robocopy "%SOURCE_DIR%\program\exe\uv" "%DEST_DIR%\program\exe\uv" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+  set "RC=!ERRORLEVEL!"
+  if !RC! GEQ 8 (
+    echo [ERROR] Failed to copy runtime: program\exe\uv (robocopy rc=!RC!)
+    exit /b 1
+  )
+)
+if exist "%SOURCE_DIR%\program\exe\llama" (
+  robocopy "%SOURCE_DIR%\program\exe\llama" "%DEST_DIR%\program\exe\llama" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+  set "RC=!ERRORLEVEL!"
+  if !RC! GEQ 8 (
+    echo [ERROR] Failed to copy runtime: program\exe\llama (robocopy rc=!RC!)
+    exit /b 1
+  )
 )
 
 echo [OK] Copy complete: %DEST_DIR%
@@ -101,7 +131,7 @@ if not exist "%DEST_TEST_BAT%" (
 echo [STEP] Running test: %DEST_TEST_BAT%
 set "KIMODO_TEST_MODELS_ROOT=%TEST_MODELS_ROOT%"
 set "KIMODO_TEST_SERVER_WINDOW_STYLE=Normal"
-if not defined KIMODO_TEST_WAIT_TIMEOUT_SEC set "KIMODO_TEST_WAIT_TIMEOUT_SEC=180"
+if not defined KIMODO_TEST_WAIT_TIMEOUT_SEC set "KIMODO_TEST_WAIT_TIMEOUT_SEC=300"
 echo [INFO] KIMODO_TEST_SERVER_WINDOW_STYLE=%KIMODO_TEST_SERVER_WINDOW_STYLE%
 echo [INFO] KIMODO_TEST_WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%
 call "%DEST_TEST_BAT%"

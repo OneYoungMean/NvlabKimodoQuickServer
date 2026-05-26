@@ -2,11 +2,8 @@ diff_cmd () {
 	"$merge_tool_path" "$LOCAL" "$REMOTE"
 }
 
-diff_cmd_help () {
-	echo "Use Beyond Compare (requires a graphical session)"
-}
-
 merge_cmd () {
+	touch "$BACKUP"
 	if $base_present
 	then
 		"$merge_tool_path" "$LOCAL" "$REMOTE" "$BASE" \
@@ -15,10 +12,7 @@ merge_cmd () {
 		"$merge_tool_path" "$LOCAL" "$REMOTE" \
 			-mergeoutput="$MERGED"
 	fi
-}
-
-merge_cmd_help () {
-	echo "Use Beyond Compare (requires a graphical session)"
+	check_unchanged
 }
 
 translate_merge_tool_path() {
@@ -28,10 +22,4 @@ translate_merge_tool_path() {
 	else
 		echo bcompare
 	fi
-}
-
-list_tool_variants () {
-	echo bc
-	echo bc3
-	echo bc4
 }

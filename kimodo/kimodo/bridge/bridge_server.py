@@ -12,10 +12,13 @@ import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -86,6 +89,203 @@ def _log(msg: str):
             f.write(line + "\n")
     except Exception:
         pass
+
+
+class LlamaServiceManager:
+    def __init__(self, kimodo_root: str, gguf_model_path: str, ctx_size: int, startup_timeout_sec: int):
+        self.kimodo_root = os.path.abspath(kimodo_root)
+        self.gguf_model_path = gguf_model_path
+        self.ctx_size = int(ctx_size)
+        self.startup_timeout_sec = int(startup_timeout_sec)
+        self.process: subprocess.Popen | None = None
+        self.port: int = 0
+        self.base_url: str = ""
+        self.model_file: str = ""
+        self.embedding_model: str = os.environ.get("KIMODO_GGUF_EMBED_MODEL", "default").strip() or "default"
+
+    def _resolve_llama_server_exe(self) -> str:
+        exe_name = "llama-server.exe" if os.name == "nt" else "llama-server"
+        candidates = [
+            os.path.join(self.kimodo_root, "program", "exe", "llama", exe_name),
+            os.path.join(self.kimodo_root, "program", "exe", "llama", "bin", exe_name),
+        ]
+        for cand in candidates:
+            if os.path.isfile(cand):
+                return os.path.abspath(cand)
+        raise FileNotFoundError(
+            "llama-server executable not found. "
+            f"Expected one of: {candidates}"
+        )
+
+    def _resolve_gguf_file(self) -> str:
+        raw_path = (self.gguf_model_path or "").strip()
+        if not raw_path:
+            raise ValueError("KIMODO_GGUF_MODEL_PATH is empty.")
+        abs_path = os.path.abspath(raw_path)
+        if os.path.isfile(abs_path):
+            if abs_path.lower().endswith(".gguf"):
+                return abs_path
+            raise ValueError(f"KIMODO_GGUF_MODEL_PATH is not a .gguf file: {abs_path}")
+
+        if not os.path.isdir(abs_path):
+            raise FileNotFoundError(f"KIMODO_GGUF_MODEL_PATH does not exist: {abs_path}")
+
+        matches: list[str] = []
+        for root, _dirs, files in os.walk(abs_path):
+            for name in files:
+                if name.lower().endswith(".gguf"):
+                    matches.append(os.path.join(root, name))
+        if not matches:
+            raise FileNotFoundError(f"No .gguf files found under: {abs_path}")
+        matches.sort(key=lambda p: (len(p), p.lower()))
+        return os.path.abspath(matches[0])
+
+    def _pick_free_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return int(s.getsockname()[1])
+
+    def _embedding_healthcheck(self) -> tuple[bool, str]:
+        def has_embedding(payload_obj: Any) -> bool:
+            if isinstance(payload_obj, dict):
+                data = payload_obj.get("data")
+                if isinstance(data, list) and len(data) > 0:
+                    first = data[0]
+                    if isinstance(first, dict):
+                        emb = first.get("embedding")
+                        return isinstance(emb, list) and len(emb) > 0
+                    if isinstance(first, list):
+                        return len(first) > 0
+                emb = payload_obj.get("embedding")
+                if isinstance(emb, list) and len(emb) > 0:
+                    return True
+                return False
+            if isinstance(payload_obj, list) and len(payload_obj) > 0:
+                first = payload_obj[0]
+                if isinstance(first, (int, float)):
+                    return True
+                if isinstance(first, list) and len(first) > 0:
+                    return True
+                if isinstance(first, dict):
+                    emb = first.get("embedding")
+                    return isinstance(emb, list) and len(emb) > 0
+            return False
+
+        endpoints = ["/v1/embeddings", "/embeddings"]
+        payloads = [
+            {"model": self.embedding_model, "input": "kimodo-healthcheck"},
+            {"model": self.embedding_model, "input": ["kimodo-healthcheck"]},
+            {"input": "kimodo-healthcheck"},
+            {"input": ["kimodo-healthcheck"]},
+        ]
+        last_error = "unknown"
+        for ep in endpoints:
+            for body in payloads:
+                payload = json.dumps(body).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{self.base_url}{ep}",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        text = resp.read().decode("utf-8", errors="replace")
+                except Exception as exc:
+                    last_error = f"{ep} {type(exc).__name__}: {exc}"
+                    continue
+                try:
+                    obj = json.loads(text)
+                except Exception as exc:
+                    last_error = f"{ep} invalid-json: {exc}"
+                    continue
+                if has_embedding(obj):
+                    return True, "ok"
+                last_error = f"{ep} unexpected-embedding-response: {obj}"
+        return False, last_error
+
+    def _start_with_flag(self, embedding_flag: str) -> None:
+        exe = self._resolve_llama_server_exe()
+        self.model_file = self._resolve_gguf_file()
+        self.port = self._pick_free_port()
+        self.base_url = f"http://127.0.0.1:{self.port}"
+        cmd = [
+            exe,
+            "-m",
+            self.model_file,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(self.port),
+            embedding_flag,
+        ]
+        if self.ctx_size > 0:
+            cmd.extend(["--ctx-size", str(self.ctx_size)])
+
+        _log(
+            "[llama] launch cmd="
+            + " ".join([f'"{x}"' if " " in x else x for x in cmd])
+        )
+        self.process = subprocess.Popen(
+            cmd,
+            cwd=os.path.dirname(exe),
+        )
+
+        deadline = time.time() + float(self.startup_timeout_sec)
+        last_error = "starting"
+        while time.time() < deadline:
+            if self.process is None:
+                last_error = "process-not-created"
+                break
+            rc = self.process.poll()
+            if rc is not None:
+                last_error = f"llama-server exited early with code {rc}"
+                break
+            ok, msg = self._embedding_healthcheck()
+            if ok:
+                _log(
+                    f"[llama] ready port={self.port} model={self.model_file} "
+                    f"ctx={self.ctx_size}"
+                )
+                return
+            last_error = msg
+            time.sleep(1.0)
+
+        self.stop()
+        raise RuntimeError(
+            f"llama-server did not become healthy in {self.startup_timeout_sec}s: {last_error}"
+        )
+
+    def start(self) -> None:
+        if self.process is not None:
+            return
+
+        startup_errors: list[str] = []
+        for flag in ("--embeddings", "--embedding"):
+            try:
+                self._start_with_flag(flag)
+                return
+            except Exception as exc:
+                startup_errors.append(f"{flag}: {exc}")
+                _log(f"[llama] startup failed with {flag}: {exc}")
+        raise RuntimeError(" ; ".join(startup_errors))
+
+    def stop(self) -> None:
+        proc = self.process
+        self.process = None
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            _log(f"[llama] stopped rc={proc.returncode}")
+        except Exception as exc:
+            _log(f"[llama] stop error: {exc}")
 
 
 def _rotation_mats_to_quat_wxyz(rot_mats: np.ndarray) -> np.ndarray:
@@ -351,6 +551,7 @@ def main():
     active_command_lock = threading.Lock()
     quitting = False
     quitting_lock = threading.Lock()
+    llama_service: LlamaServiceManager | None = None
 
     def _set_loading_message(message: str):
         with state_lock:
@@ -393,6 +594,33 @@ def main():
             return
 
         device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        cpu_encoder_mode = os.environ.get("KIMODO_CPU_TEXT_ENCODER", "").strip().lower()
+        if cpu_encoder_mode == "gguf" and str(device).lower().startswith("cpu"):
+            try:
+                gguf_path = os.environ.get("KIMODO_GGUF_MODEL_PATH", "").strip()
+                gguf_ctx = int(os.environ.get("KIMODO_GGUF_CTX", "4096"))
+                gguf_timeout = int(os.environ.get("KIMODO_GGUF_STARTUP_TIMEOUT_SEC", "120"))
+                nonlocal llama_service
+                llama_service = LlamaServiceManager(
+                    kimodo_root=kimodo_root,
+                    gguf_model_path=gguf_path,
+                    ctx_size=gguf_ctx,
+                    startup_timeout_sec=gguf_timeout,
+                )
+                llama_service.start()
+                os.environ["TEXT_ENCODER_MODE"] = "api"
+                os.environ["TEXT_ENCODER_API_BACKEND"] = "llama"
+                os.environ["TEXT_ENCODER_URL"] = llama_service.base_url
+                _log(
+                    f"[bridge] cpu gguf text encoder enabled. "
+                    f"url={llama_service.base_url} model={llama_service.model_file}"
+                )
+            except Exception as exc:
+                with state_lock:
+                    state["error"] = f"Failed to start llama text-encoder service: {exc}"
+                    state["loading"] = False
+                _log(f"[bridge] llama startup error {exc}")
+                return
         _set_loading_message(f"Loading {args.model} on {device}...")
         _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
         _log(f"[bridge] load stage: load_model start model={args.model} device={device}")
@@ -593,6 +821,11 @@ def main():
                     except (ConnectionResetError, BrokenPipeError, OSError):
                         break
     finally:
+        try:
+            if llama_service is not None:
+                llama_service.stop()
+        except Exception:
+            pass
         try:
             server.close()
         except Exception:

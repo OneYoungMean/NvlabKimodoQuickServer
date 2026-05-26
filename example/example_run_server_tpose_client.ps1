@@ -23,6 +23,14 @@ $stream = $null
 $writer = $null
 $reader = $null
 $maxGenerateWaitMinutes = 30
+if ($env:KIMODO_TEST_GENERATE_WAIT_MINUTES) {
+    $parsed = 0
+    if ([int]::TryParse($env:KIMODO_TEST_GENERATE_WAIT_MINUTES, [ref]$parsed)) {
+        if ($parsed -gt 0) {
+            $maxGenerateWaitMinutes = $parsed
+        }
+    }
+}
 
 try {
     $client = New-Object Net.Sockets.TcpClient($HostName, $Port)

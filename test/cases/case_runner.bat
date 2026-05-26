@@ -21,7 +21,7 @@ set "EXPECT_FAIL_RUN1=%~7"
 set "RESULT_FILE=%~8"
 
 if not defined HIGHVRAM set "HIGHVRAM=0"
-if not defined USE_SHARED set "USE_SHARED=1"
+if not defined USE_SHARED set "USE_SHARED=0"
 if not defined EXPECT_FAIL_RUN1 set "EXPECT_FAIL_RUN1=1"
 if not defined RESULT_FILE set "RESULT_FILE=%TEMP%\kimodo_case_result_%RANDOM%%RANDOM%.txt"
 
@@ -74,11 +74,15 @@ set "RUN2_WAIT_TIMEOUT_SEC=%KIMODO_TEST_RUN2_WAIT_TIMEOUT_SEC%"
 if not defined RUN2_WAIT_TIMEOUT_SEC set "RUN2_WAIT_TIMEOUT_SEC=600"
 if not defined RUN1_WAIT_TIMEOUT_SEC (
   if "%EXPECT_FAIL_RUN1%"=="1" (
-    set "RUN1_WAIT_TIMEOUT_SEC=180"
+    set "RUN1_WAIT_TIMEOUT_SEC=60"
   ) else (
     set "RUN1_WAIT_TIMEOUT_SEC=%RUN2_WAIT_TIMEOUT_SEC%"
   )
 )
+
+set "RUN_DEVICE=%KIMODO_TEST_DEVICE%"
+if not defined RUN_DEVICE set "RUN_DEVICE=cuda"
+if not defined KIMODO_SETUP_DEVICE set "KIMODO_SETUP_DEVICE=%RUN_DEVICE%"
 
 set "KIMODO_TEST_WAIT_TIMEOUT_SEC=%RUN1_WAIT_TIMEOUT_SEC%"
 set "KIMODO_TEST_OUTPUT=file"
@@ -93,6 +97,10 @@ if "%USE_SHARED%"=="1" (
 set "KIMODO_TEST_HIGHVRAM=%HIGHVRAM%"
 if defined MODEL_NAME set "KIMODO_TEST_MODEL=%MODEL_NAME%"
 if defined INJECT_VAR if defined INJECT_VAL set "%INJECT_VAR%=%INJECT_VAL%"
+
+if /I "%CASE_NAME%"=="download_interrupt_once" call :warmup_setup || exit /b 1
+if /I "%CASE_NAME%"=="download_network_bad_once" call :warmup_setup || exit /b 1
+if /I "%CASE_NAME%"=="download_then_model_missing_once" call :warmup_setup || exit /b 1
 
 pushd "%RUN_ROOT%" >nul
 call "%TEST_BAT%"
@@ -158,6 +166,19 @@ if "%RC2%"=="0" (
 
 call :write_result FAIL "run2_failed_rc_%RC2%"
 exit /b 1
+
+:warmup_setup
+if exist "%RUN_ROOT%\.setup.complete" exit /b 0
+if not exist "%RUN_ROOT%\bash\setup.bat" exit /b 0
+pushd "%RUN_ROOT%" >nul
+call "%RUN_ROOT%\bash\setup.bat" --output file --log "%RUN_ROOT%\log\setup.log"
+set "WARMUP_SETUP_RC=%ERRORLEVEL%"
+popd >nul
+if not "%WARMUP_SETUP_RC%"=="0" (
+  call :write_result FAIL "warmup_setup_failed_rc_%WARMUP_SETUP_RC%"
+  exit /b 1
+)
+exit /b 0
 
 :write_result
 set "STATUS=%~1"

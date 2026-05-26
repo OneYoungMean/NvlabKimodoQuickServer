@@ -59,6 +59,12 @@ def _resolve_hf_model_path(modelname: str) -> Path:
 
 
 def _build_api_text_encoder_conf(text_encoder_url: str) -> dict:
+    backend = get_env_var("TEXT_ENCODER_API_BACKEND", "gradio").strip().lower()
+    if backend == "llama":
+        return {
+            "_target_": "kimodo.model.text_encoder_llama_api.LlamaEmbeddingsAPI",
+            "url": text_encoder_url,
+        }
     return {
         "_target_": "kimodo.model.text_encoder_api.TextEncoderAPI",
         "url": text_encoder_url,

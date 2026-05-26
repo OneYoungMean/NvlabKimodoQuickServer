@@ -11,6 +11,8 @@ set "SETUP_LOG=%ROOT_DIR%\log\setup_buildenv_impl.log"
 set "NETWORK_PROBE_PS1=%ROOT_DIR%\bash\probe_network_env.ps1"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "RECOVERY_FLAG_DIR=%ROOT_DIR%\archive\recovery_flags"
+set "LLAMA_DIR=%ROOT_DIR%\program\exe\llama"
+set "LLAMA_SERVER_EXE=%LLAMA_DIR%\llama-server.exe"
 
 if not exist "%ROOT_DIR%" exit /b 1
 if not exist "%ROOT_DIR%\log" mkdir "%ROOT_DIR%\log" >nul 2>nul
@@ -84,6 +86,11 @@ set "UV_PYTHON_INSTALL_DIR=%UV_PYTHON_INSTALL_DIR%"
 call :ensure_local_git_lfs
 if errorlevel 1 (
   echo [ERROR] local git/git-lfs check failed.
+  exit /b 1
+)
+call :ensure_llama_server
+if errorlevel 1 (
+  echo [ERROR] llama-server provisioning failed.
   exit /b 1
 )
 
@@ -207,19 +214,22 @@ if /I "%SETUP_DEVICE%"=="cpu" (
     echo [ERROR] Failed to install CPU torch packages.
     exit /b 1
   )
-  echo [STEP] Validating CPU torch runtime...
-  "%VENV_PY%" -c "import torch,sys; print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if not torch.cuda.is_available() else 0)"
+  call :validate_torch_env "cpu"
   if errorlevel 1 (
     echo [ERROR] CPU torch runtime validation failed.
     exit /b 1
   )
-  call :ensure_bitsandbytes "CPU mode"
-  if errorlevel 1 exit /b 1
+  echo [INFO] CPU mode: skip bitsandbytes/4-bit install by policy.
 ) else (
   echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
   "%VENV_PY%" -m torchruntime install torch torchvision torchaudio
   if errorlevel 1 (
     echo [ERROR] torchruntime failed to install CUDA-enabled torch packages.
+    exit /b 1
+  )
+  call :validate_torch_env "cuda"
+  if errorlevel 1 (
+    echo [ERROR] CUDA torch runtime validation failed.
     exit /b 1
   )
   call :ensure_bitsandbytes "CUDA mode"
@@ -352,6 +362,43 @@ if /I "%KIMODO_PYTHON_ARCH%"=="x86" (
 )
 set "PYTHON_SPEC=cpython-3.12.13-windows-x86_64-none"
 echo [INFO] Python arch selected: x64 ^(required by torch wheels on Windows^).
+exit /b 0
+
+:ensure_llama_server
+if exist "%LLAMA_SERVER_EXE%" (
+  "%LLAMA_SERVER_EXE%" --version >nul 2>nul
+  if not errorlevel 1 (
+    echo [OK] local llama-server ready: %LLAMA_SERVER_EXE%
+    exit /b 0
+  )
+)
+if not exist "%LLAMA_SERVER_EXE%" (
+  echo [ERROR] Missing local llama-server: %LLAMA_SERVER_EXE%
+  echo [ERROR] Place llama runtime files under: %LLAMA_DIR%
+  exit /b 1
+)
+echo [ERROR] local llama-server exists but is not executable: %LLAMA_SERVER_EXE%
+exit /b 1
+
+:validate_torch_env
+set "VALIDATE_MODE=%~1"
+if /I "%VALIDATE_MODE%"=="cpu" (
+  echo [STEP] Validating CPU torch runtime...
+  "%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0)"
+  if errorlevel 1 (
+    echo [ERROR] Python environment is abnormal for CPU runtime.
+    echo [ERROR] Please reinstall setup: bash\setup.bat --force --device cpu
+    exit /b 1
+  )
+  exit /b 0
+)
+echo [STEP] Validating CUDA torch runtime...
+"%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if (torch.cuda.is_available() and torch.version.cuda is not None) else 2)"
+if errorlevel 1 (
+  echo [ERROR] Python environment is abnormal for CUDA runtime.
+  echo [ERROR] Please reinstall setup: bash\setup.bat --force --device cuda
+  exit /b 1
+)
 exit /b 0
 
 :ensure_bitsandbytes

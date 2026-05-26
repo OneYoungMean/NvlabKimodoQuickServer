@@ -38,6 +38,12 @@ set "SOURCE_ROOT="
 set "MODEL_DIR_NAME="
 set "MODEL_RUN_NAME="
 set "MODELS_ROOT=%KIMODO_MODELS_ROOT%"
+set "CPU_TEXT_ENCODER=%KIMODO_CPU_TEXT_ENCODER%"
+if not defined CPU_TEXT_ENCODER set "CPU_TEXT_ENCODER=gguf"
+set "GGUF_MODEL_PATH=%KIMODO_GGUF_MODEL_PATH%"
+set "GGUF_CTX=%KIMODO_GGUF_CTX%"
+set "USE_CPU_GGUF=0"
+set "DOWNLOAD_GGUF=0"
 set "VENV_PATH_ARG="
 set "VENV_PY="
 set "USING_EXTERNAL_MODELS=0"
@@ -210,6 +216,7 @@ if /I "%HIGHVRAM%"=="1" (
   set "TEXT_ENCODERS_DIR="
   set "KIMODO_LLM2VEC_PEFT_DIR="
 )
+if not defined GGUF_MODEL_PATH set "GGUF_MODEL_PATH=%MODELS_ROOT%\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF"
 if exist "%PORT_FILE%" (
   echo [WARN] Found existing serverport, archiving stale file before fresh launch.
   call "%COMMON_ENV_BAT%" :archive_file "%PORT_FILE%" "%RECYCLE_DIR%"
@@ -218,6 +225,15 @@ if exist "%PORT_FILE%" (
 call "%RUN_SETUP_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_VENV%" "%SETUP_SENTINEL%" "%SETUP_BAT%" "%LOG_DIR%\%LOG_NAME_SETUP%"
 if errorlevel 1 exit /b 1
 
+if defined RUN_DEVICE (
+  if /I "%RUN_DEVICE%"=="cpu" (
+    if /I "%CPU_TEXT_ENCODER%"=="gguf" (
+      set "USE_CPU_GGUF=1"
+      set "DOWNLOAD_GGUF=1"
+    )
+  )
+)
+set "KIMODO_DOWNLOAD_GGUF=%DOWNLOAD_GGUF%"
 call "%RUN_DOWNLOAD_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_MODELS%" "%HIGHVRAM%" "%MODEL_RUN_NAME%" "%MODEL_NAME%" "%DOWNLOAD_BAT%" "%LOG_DIR%\%LOG_NAME_DOWNLOAD%"
 if errorlevel 1 exit /b 1
 
@@ -231,7 +247,25 @@ if not exist "%MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors" (
   echo [ERROR] Missing model file: %MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors
   exit /b 1
 )
-if "%HIGHVRAM%"=="1" (
+if "%USE_CPU_GGUF%"=="1" (
+  if not exist "%GGUF_MODEL_PATH%" (
+    echo [ERROR] CPU gguf mode enabled but path missing: %GGUF_MODEL_PATH%
+    exit /b 1
+  )
+  set "GGUF_MODEL_FILE="
+  if /I "%GGUF_MODEL_PATH:~-5%"==".gguf" (
+    set "GGUF_MODEL_FILE=%GGUF_MODEL_PATH%"
+  ) else (
+    for /f "delims=" %%F in ('dir /b /s "%GGUF_MODEL_PATH%\*.gguf" 2^>nul') do (
+      if not defined GGUF_MODEL_FILE set "GGUF_MODEL_FILE=%%F"
+    )
+  )
+  if not defined GGUF_MODEL_FILE (
+    echo [ERROR] CPU gguf mode enabled but no .gguf found under: %GGUF_MODEL_PATH%
+    exit /b 1
+  )
+  set "KIMODO_GGUF_MODEL_PATH=!GGUF_MODEL_FILE!"
+) else if "%HIGHVRAM%"=="1" (
   if not exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "%MODELS_ROOT%\Meta-Llama-3-8B-Instruct\model.safetensors" (
     echo [ERROR] Missing Meta-Llama model under %MODELS_ROOT%\Meta-Llama-3-8B-Instruct
     exit /b 1
@@ -251,11 +285,23 @@ set "PYTHONPATH=%SOURCE_ROOT%"
 set "KIMODO_ROOT_PATH=%ROOT_DIR%"
 set "CHECKPOINT_DIR=%MODELS_ROOT%"
 set "LOCAL_CACHE=true"
-set "TEXT_ENCODER_MODE=local"
-set "TEXT_ENCODER=llm2vec"
-set "TEXT_ENCODER_DEVICE=%TEXT_ENCODER_DEVICE_MODE%"
+if "%USE_CPU_GGUF%"=="1" (
+  set "TEXT_ENCODER_MODE=api"
+  set "TEXT_ENCODER_API_BACKEND=llama"
+  set "KIMODO_CPU_TEXT_ENCODER=gguf"
+  if defined GGUF_CTX set "KIMODO_GGUF_CTX=%GGUF_CTX%"
+  set "TEXT_ENCODER_DEVICE=cpu"
+) else (
+  set "TEXT_ENCODER_MODE=local"
+  set "TEXT_ENCODER=llm2vec"
+  set "TEXT_ENCODER_DEVICE=%TEXT_ENCODER_DEVICE_MODE%"
+)
 echo [INFO] Runtime device: %RUN_DEVICE%
 echo [INFO] Text encoder device: %TEXT_ENCODER_DEVICE%
+if "%USE_CPU_GGUF%"=="1" (
+  echo [INFO] CPU text encoder mode: gguf
+  echo [INFO] GGUF model path: !KIMODO_GGUF_MODEL_PATH!
+)
 set "HF_HOME=%ROOT_DIR%\hf_cache"
 set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
 set "HF_HUB_CACHE=%HF_HOME%\hub"

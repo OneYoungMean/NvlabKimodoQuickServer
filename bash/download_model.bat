@@ -11,17 +11,26 @@ set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\download_model.log"
 set "UNLOCK_STALE=0"
 set "FORCE_SYNC=0"
+set "DOWNLOAD_GGUF=%KIMODO_DOWNLOAD_GGUF%"
+if not defined DOWNLOAD_GGUF set "DOWNLOAD_GGUF=1"
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
 set "MODEL_DIR_NAME="
 set "MODEL_REPO_URL="
+set "MODEL_REPO_URL_FALLBACK="
 set "RESOLVE_MODEL_ALIAS_BAT=%ROOT_DIR%\bash\resolve_model_alias.bat"
 set "LLM2VEC_NF4_REPO_URL=https://www.modelscope.cn/oneyoungmean/KIMODO-Meta3_llm2vec_NF4.git"
+set "LLM2VEC_NF4_REPO_URL_FALLBACK=https://huggingface.co/Aero-Ex/KIMODO-Meta3_llm2vec_NF4"
+set "GGUF_REPO_URL=https://www.modelscope.cn/LLM-Research/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF.git"
+set "GGUF_REPO_URL_FALLBACK=https://huggingface.co/Aero-Ex/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF"
 set "META_LLAMA_REPO_URL=https://www.modelscope.cn/models/LLM-Research/Meta-Llama-3-8B-Instruct"
 set "LLM2VEC_PEFT_REPO_URL=https://www.modelscope.cn/models/oneyoungmean/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
 set "INJECT_ONCE=0"
 
 if defined KIMODO_LLM2VEC_NF4_REPO_URL set "LLM2VEC_NF4_REPO_URL=%KIMODO_LLM2VEC_NF4_REPO_URL%"
+if defined KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK set "LLM2VEC_NF4_REPO_URL_FALLBACK=%KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK%"
+if defined KIMODO_GGUF_REPO_URL set "GGUF_REPO_URL=%KIMODO_GGUF_REPO_URL%"
+if defined KIMODO_GGUF_REPO_URL_FALLBACK set "GGUF_REPO_URL_FALLBACK=%KIMODO_GGUF_REPO_URL_FALLBACK%"
 if defined KIMODO_META_LLAMA_REPO_URL set "META_LLAMA_REPO_URL=%KIMODO_META_LLAMA_REPO_URL%"
 if defined KIMODO_LLM2VEC_PEFT_REPO_URL set "LLM2VEC_PEFT_REPO_URL=%KIMODO_LLM2VEC_PEFT_REPO_URL%"
 
@@ -52,6 +61,11 @@ if /I "%~1"=="--force" (
 if /I "%~1"=="--model" (
   set "MODEL_NAME=%~2"
   shift
+  shift
+  goto parse_args
+)
+if /I "%~1"=="--download-gguf" (
+  set "DOWNLOAD_GGUF=1"
   shift
   goto parse_args
 )
@@ -91,7 +105,11 @@ if errorlevel 1 exit /b 1
 set "MODEL_NAME=%MODEL_NAME%"
 set "MODEL_DIR_NAME=%MODEL_DIR_NAME%"
 set "MODEL_REPO_URL=https://www.modelscope.cn/nv-community/%MODEL_REPO_NAME%.git"
-call :ensure_repo "%MODEL_REPO_URL%" "%MODELS_DIR%\%MODEL_DIR_NAME%" "model.safetensors" "*"
+set "MODEL_REPO_URL_FALLBACK="
+if /I "%MODEL_REPO_NAME%"=="Kimodo-SOMA-RP-v1.1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.1"
+if /I "%MODEL_REPO_NAME%"=="Kimodo-SMPLX-RP-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SMPLX-RP-v1"
+if /I "%MODEL_REPO_NAME%"=="Kimodo-G1-RP-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-G1-RP-v1"
+call :ensure_repo_with_fallback "%MODEL_REPO_URL%" "%MODEL_REPO_URL_FALLBACK%" "%MODELS_DIR%\%MODEL_DIR_NAME%" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 
 if "%HIGHVRAM%"=="1" (
@@ -99,7 +117,11 @@ if "%HIGHVRAM%"=="1" (
   call :ensure_repo "%META_LLAMA_REPO_URL%" "%MODELS_DIR%\Meta-Llama-3-8B-Instruct" "model.safetensors.index.json" "*" || exit /b 1
   call :ensure_repo_any "%LLM2VEC_PEFT_REPO_URL%" "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised" "adapter_model.safetensors" "model.safetensors" "*" || exit /b 1
 ) else (
-  call :ensure_repo "%LLM2VEC_NF4_REPO_URL%" "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4" "model.safetensors" "*" || exit /b 1
+  call :ensure_repo_with_fallback "%LLM2VEC_NF4_REPO_URL%" "%LLM2VEC_NF4_REPO_URL_FALLBACK%" "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4" "model.safetensors" "*" || exit /b 1
+)
+if /I "%DOWNLOAD_GGUF%"=="1" (
+  echo [STEP] CPU gguf mode enabled: downloading GGUF text encoder model
+  call :ensure_repo_with_fallback "%GGUF_REPO_URL%" "%GGUF_REPO_URL_FALLBACK%" "%MODELS_DIR%\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF" ".gguf" "*" || exit /b 1
 )
 
 echo [OK] download_model complete.
@@ -123,6 +145,21 @@ if not errorlevel 1 exit /b 0
 echo [ERROR] Missing required files after sync: %ANY_DEST_DIR%
 echo [ERROR] Need one of: %ANY_REQ_A% or %ANY_REQ_B%
 exit /b 1
+
+:ensure_repo_with_fallback
+set "PRIMARY_REPO_URL=%~1"
+set "FALLBACK_REPO_URL=%~2"
+set "FALLBACK_DEST_DIR=%~3"
+set "FALLBACK_REQ_FILE=%~4"
+set "FALLBACK_LFS_INCLUDE=%~5"
+call :ensure_repo "%PRIMARY_REPO_URL%" "%FALLBACK_DEST_DIR%" "%FALLBACK_REQ_FILE%" "%FALLBACK_LFS_INCLUDE%"
+if not errorlevel 1 exit /b 0
+if not defined FALLBACK_REPO_URL exit /b 1
+echo [WARN] Primary repo failed, fallback to: %FALLBACK_REPO_URL%
+call :ensure_repo "%FALLBACK_REPO_URL%" "%FALLBACK_DEST_DIR%" "%FALLBACK_REQ_FILE%" "%FALLBACK_LFS_INCLUDE%"
+if errorlevel 1 exit /b 1
+echo [OK] Fallback repo succeeded: %FALLBACK_REPO_URL%
+exit /b 0
 
 :ensure_git
 set "GIT_HINT=%ROOT_DIR%\program\exe\git\cmd"
@@ -172,12 +209,26 @@ if "!INJECT_ONCE!"=="1" (
   exit /b 92
 )
 
-if "%FORCE_SYNC%"=="0" if exist "%DEST_DIR%\%REQ_FILE%" (
-  echo [INFO] Skip existing model: %DEST_DIR%
-  call :validate_repo_safetensors "%DEST_DIR%" "%REQ_FILE%" "%LFS_INCLUDE%"
-  if errorlevel 1 exit /b 1
-  call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
-  exit /b 0
+if "%FORCE_SYNC%"=="0" (
+  if /I "%REQ_FILE%"==".gguf" (
+    if exist "%DEST_DIR%" (
+      call :ensure_gguf_presence "%DEST_DIR%"
+      if not errorlevel 1 (
+        echo [INFO] Skip existing gguf model: %DEST_DIR%
+        call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
+        exit /b 0
+      )
+      echo [WARN] Existing GGUF directory has no .gguf files, forcing sync: %DEST_DIR%
+    )
+  ) else (
+    if exist "%DEST_DIR%\%REQ_FILE%" (
+      echo [INFO] Skip existing model: %DEST_DIR%
+      call :validate_repo_safetensors "%DEST_DIR%" "%REQ_FILE%" "%LFS_INCLUDE%"
+      if errorlevel 1 exit /b 1
+      call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
+      exit /b 0
+    )
+  )
 )
 
 if exist "%DEST_DIR%" (
@@ -186,6 +237,7 @@ if exist "%DEST_DIR%" (
   )
 )
 
+:ensure_repo_sync
 if not exist "%DEST_DIR%" (
   echo [STEP] Cloning %REPO_URL%
   set "GIT_LFS_SKIP_SMUDGE=1"
@@ -212,19 +264,35 @@ call :prepare_repo "%DEST_DIR%" || exit /b 1
 git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
 if errorlevel 1 exit /b 1
 
-if not exist "%DEST_DIR%\%REQ_FILE%" (
-  git -C "%DEST_DIR%" checkout HEAD -- "%REQ_FILE%"
-  if errorlevel 1 exit /b 1
-  git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
-  if errorlevel 1 exit /b 1
-)
-if not exist "%DEST_DIR%\%REQ_FILE%" (
-  echo [ERROR] Missing %REQ_FILE% after sync: %DEST_DIR%
-  exit /b 1
+if /I "%REQ_FILE%"==".gguf" (
+  call :ensure_gguf_presence "%DEST_DIR%"
+  if errorlevel 1 (
+    echo [ERROR] Missing .gguf files after sync: %DEST_DIR%
+    exit /b 1
+  )
+) else (
+  if not exist "%DEST_DIR%\%REQ_FILE%" (
+    git -C "%DEST_DIR%" checkout HEAD -- "%REQ_FILE%"
+    if errorlevel 1 exit /b 1
+    git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
+    if errorlevel 1 exit /b 1
+  )
+  if not exist "%DEST_DIR%\%REQ_FILE%" (
+    echo [ERROR] Missing %REQ_FILE% after sync: %DEST_DIR%
+    exit /b 1
+  )
 )
 call :validate_repo_safetensors "%DEST_DIR%" "%REQ_FILE%" "%LFS_INCLUDE%"
 if errorlevel 1 exit /b 1
 call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
+exit /b 0
+
+:ensure_gguf_presence
+set "GGUF_DIR=%~1"
+set "GGUF_COUNT=0"
+for /f %%G in ('dir /b /s "%GGUF_DIR%\*.gguf" 2^>nul ^| find /c /v ""') do set "GGUF_COUNT=%%G"
+if not defined GGUF_COUNT set "GGUF_COUNT=0"
+if "%GGUF_COUNT%"=="0" exit /b 1
 exit /b 0
 
 :normalize_repo_url

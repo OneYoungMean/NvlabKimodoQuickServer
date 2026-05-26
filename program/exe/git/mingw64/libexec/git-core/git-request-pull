@@ -4,6 +4,9 @@
 # This file is licensed under the GPL v2, or a later version
 # at the discretion of Linus Torvalds.
 
+USAGE='<start> <url> [<end>]'
+LONG_USAGE='Summarizes the changes between two commits to the standard output,
+and includes the given URL in the generated summary.'
 SUBDIRECTORY_OK='Yes'
 OPTIONS_KEEPDASHDASH=
 OPTIONS_STUCKLONG=
@@ -65,8 +68,6 @@ test -z "$head" && die "fatal: Not a valid revision: $local"
 headrev=$(git rev-parse --verify --quiet "$head"^0)
 test -z "$headrev" && die "fatal: Ambiguous revision: $local"
 
-local_sha1=$(git rev-parse --verify --quiet "$head")
-
 # Was it a branch with a description?
 branch_name=${head#refs/heads/}
 if test "z$branch_name" = "z$headref" ||
@@ -78,58 +79,42 @@ fi
 merge_base=$(git merge-base $baserev $headrev) ||
 die "fatal: No commits in common between $base and $head"
 
-find_matching_ref () {
-	while read sha1 ref
-	do
-		case "$ref" in
-		*"^"?*)
-			ref="${ref%"^"*}"
-			deref=true
-			;;
-		*)
-			deref=
-			;;
-		esac
+# $head is the refname from the command line.
+# If a ref with the same name as $head exists at the remote
+# and their values match, use that.
+#
+# Otherwise find a random ref that matches $headrev.
+find_matching_ref='
+	my ($head,$headrev) = (@ARGV);
+	my ($found);
 
-		if test "$sha1" = "${remote:-HEAD}"
-		then
-			echo "$sha1 $sha1"
-			break
-		fi
+	while (<STDIN>) {
+		chomp;
+		my ($sha1, $ref, $deref) = /^(\S+)\s+([^^]+)(\S*)$/;
+		my ($pattern);
+		next unless ($sha1 eq $headrev);
 
-		case "$ref" in
-		"${remote:-HEAD}"|*"/${remote:-HEAD}")
-			if test -z "$deref"
-			then
-				# Remember the matching unpeeled object on the
-				# remote side.
-				remote_sha1="$sha1"
-			fi
+		$pattern="/$head\$";
+		if ($ref eq $head) {
+			$found = $ref;
+		}
+		if ($ref =~ /$pattern/) {
+			$found = $ref;
+		}
+		if ($sha1 eq $head) {
+			$found = $sha1;
+		}
+	}
+	if ($found) {
+		print "$found\n";
+	}
+'
 
-			if test "$sha1" = "$headrev"
-			then
-				echo "${remote_sha1:-$headrev} $ref"
-				break
-			fi
-			;;
-		esac
-	done
-}
-
-# Find a ref with the same name as $remote that exists at the remote
-# and points to the same commit as the local object.
-set fnord $(git ls-remote "$url" | find_matching_ref)
-remote_sha1=$2
-ref=$3
+ref=$(git ls-remote "$url" | /usr/bin/perl -e "$find_matching_ref" "${remote:-HEAD}" "$headrev")
 
 if test -z "$ref"
 then
 	echo "warn: No match for commit $headrev found at $url" >&2
-	echo "warn: Are you sure you pushed '${remote:-HEAD}' there?" >&2
-	status=1
-elif test "$local_sha1" != "$remote_sha1"
-then
-	echo "warn: $head found at $url but points to a different object" >&2
 	echo "warn: Are you sure you pushed '${remote:-HEAD}' there?" >&2
 	status=1
 fi
@@ -146,7 +131,7 @@ git show -s --format='The following changes since commit %H:
 
   %s (%ci)
 
-are available in the Git repository at:
+are available in the git repository at:
 ' $merge_base &&
 echo "  $url $pretty_remote" &&
 git show -s --format='
@@ -159,7 +144,7 @@ for you to fetch changes up to %H:
 if test $(git cat-file -t "$head") = tag
 then
 	git cat-file tag "$head" |
-	sed -n -e '1,/^$/d' -e '/^-----BEGIN \(PGP\|SSH\|SIGNED\) /q' -e p
+	sed -n -e '1,/^$/d' -e '/^-----BEGIN PGP /q' -e p
 	echo
 	echo "----------------------------------------------------------------"
 fi &&

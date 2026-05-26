@@ -2,11 +2,8 @@ diff_cmd () {
 	"$merge_tool_path" "$LOCAL" "$REMOTE" | cat
 }
 
-diff_cmd_help () {
-	echo "Use FileMerge (requires a graphical session)"
-}
-
 merge_cmd () {
+	touch "$BACKUP"
 	if $base_present
 	then
 		"$merge_tool_path" "$LOCAL" "$REMOTE" \
@@ -15,8 +12,5 @@ merge_cmd () {
 		"$merge_tool_path" "$LOCAL" "$REMOTE" \
 			-merge "$MERGED" | cat
 	fi
-}
-
-merge_cmd_help () {
-	echo "Use FileMerge (requires a graphical session)"
+	check_unchanged
 }
