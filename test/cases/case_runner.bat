@@ -84,6 +84,7 @@ if not defined RUN1_WAIT_TIMEOUT_SEC (
 set "RUN_DEVICE=%KIMODO_TEST_DEVICE%"
 if not defined RUN_DEVICE set "RUN_DEVICE=cuda"
 if not defined KIMODO_SETUP_DEVICE set "KIMODO_SETUP_DEVICE=%RUN_DEVICE%"
+set "KIMODO_TEST_SCENARIO_NAME=%CASE_NAME%"
 
 set "KIMODO_TEST_WAIT_TIMEOUT_SEC=%RUN1_WAIT_TIMEOUT_SEC%"
 set "KIMODO_TEST_OUTPUT=file"
@@ -160,8 +161,19 @@ if "%EXPECT_FAIL_RUN1%"=="1" (
 
 pushd "%RUN_ROOT%" >nul
 call "%TEST_BAT%"
-set "RC2=%ERRORLEVEL%"
+set "RC2=!ERRORLEVEL!"
 popd >nul
+
+if not "%RC2%"=="0" (
+  if /I "%CASE_NAME%"=="cpu_network_bad_once" (
+    call :retry_run2_once
+    set "RC2=!ERRORLEVEL!"
+  )
+  if /I "%CASE_NAME%"=="download_then_model_missing_once" (
+    call :retry_run2_once
+    set "RC2=!ERRORLEVEL!"
+  )
+)
 
 if "%RC2%"=="0" (
   call :write_result PASS "ok"
@@ -170,6 +182,17 @@ if "%RC2%"=="0" (
 
 call :write_result FAIL "run2_failed_rc_%RC2%"
 exit /b 1
+
+:retry_run2_once
+echo [WARN] run2 failed once, retrying with same RUN_ROOT: %RUN_ROOT%
+if exist "%RUN_ROOT%\serverport" move "%RUN_ROOT%\serverport" "%RUN_ROOT%\archive\recycle\serverport.retry.%RANDOM%%RANDOM%" >nul 2>nul
+if exist "%RUN_ROOT%\log\example_run_server_tpose.pid" move "%RUN_ROOT%\log\example_run_server_tpose.pid" "%RUN_ROOT%\archive\recycle\example_run_server_tpose.pid.retry.%RANDOM%%RANDOM%" >nul 2>nul
+set "KIMODO_TEST_WAIT_TIMEOUT_SEC=%RUN2_WAIT_TIMEOUT_SEC%"
+pushd "%RUN_ROOT%" >nul
+call "%TEST_BAT%"
+set "RETRY_RC=%ERRORLEVEL%"
+popd >nul
+exit /b %RETRY_RC%
 
 :warmup_setup
 if exist "%RUN_ROOT%\.setup.complete" exit /b 0

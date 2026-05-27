@@ -35,7 +35,8 @@ exit /b 0
 set "SLEEP_SECONDS=%~1"
 if not defined SLEEP_SECONDS set "SLEEP_SECONDS=1"
 if %SLEEP_SECONDS% LEQ 0 set "SLEEP_SECONDS=1"
-timeout /t %SLEEP_SECONDS% /nobreak >nul
+set /a SLEEP_PING=%SLEEP_SECONDS%+1
+ping 127.0.0.1 -n !SLEEP_PING! >nul
 exit /b 0
 
 :get_file_mtime_epoch
