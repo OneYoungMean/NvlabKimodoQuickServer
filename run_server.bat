@@ -222,7 +222,12 @@ if exist "%PORT_FILE%" (
   call "%COMMON_ENV_BAT%" :archive_file "%PORT_FILE%" "%RECYCLE_DIR%"
 )
 
-call "%RUN_SETUP_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_VENV%" "%SETUP_SENTINEL%" "%SETUP_BAT%" "%LOG_DIR%\%LOG_NAME_SETUP%"
+set "SETUP_DEVICE_ARG="
+if defined RUN_DEVICE (
+  if /I "%RUN_DEVICE%"=="cpu" set "SETUP_DEVICE_ARG=cpu"
+  if /I "%RUN_DEVICE:~0,4%"=="cuda" set "SETUP_DEVICE_ARG=cuda"
+)
+call "%RUN_SETUP_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_VENV%" "%SETUP_SENTINEL%" "%SETUP_BAT%" "%LOG_DIR%\%LOG_NAME_SETUP%" "%SETUP_DEVICE_ARG%"
 if errorlevel 1 exit /b 1
 
 if defined RUN_DEVICE (

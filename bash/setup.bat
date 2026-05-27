@@ -127,6 +127,11 @@ if errorlevel 1 (
 > "%SENTINEL%" (
   echo setup_time=%DATE% %TIME%
   echo setup_device=%SETUP_DEVICE%
+  if /I "%SETUP_DEVICE%"=="cpu" (
+    echo setup_profile=cpu
+  ) else (
+    echo setup_profile=gpu
+  )
   echo root_dir=%ROOT_DIR%
   echo source_root=%SOURCE_ROOT%
 )

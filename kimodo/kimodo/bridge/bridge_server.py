@@ -9,6 +9,7 @@ Persistent process for Unity Editor:
 """
 
 import argparse
+from collections import deque
 import json
 import os
 import socket
@@ -102,6 +103,36 @@ class LlamaServiceManager:
         self.base_url: str = ""
         self.model_file: str = ""
         self.embedding_model: str = os.environ.get("KIMODO_GGUF_EMBED_MODEL", "default").strip() or "default"
+        self._tail_logs: deque[str] = deque(maxlen=120)
+        self._pipe_threads: list[threading.Thread] = []
+
+    def _append_tail(self, line: str) -> None:
+        text = str(line).strip()
+        if text:
+            self._tail_logs.append(text)
+
+    def _tail_summary(self, limit: int = 20) -> str:
+        if not self._tail_logs:
+            return ""
+        tail = list(self._tail_logs)[-max(1, int(limit)) :]
+        return " | ".join(tail)
+
+    def _pipe_pump(self, stream, stream_name: str) -> None:
+        try:
+            for raw in iter(stream.readline, ""):
+                line = raw.rstrip("\r\n")
+                if not line:
+                    continue
+                self._append_tail(f"{stream_name}: {line}")
+                _log(f"[llama][{stream_name}] {line}")
+        except Exception as exc:
+            self._append_tail(f"{stream_name}-pump-error: {exc}")
+            _log(f"[llama] {stream_name} pump error: {exc}")
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
 
     def _resolve_llama_server_exe(self) -> str:
         exe_name = "llama-server.exe" if os.name == "nt" else "llama-server"
@@ -226,10 +257,30 @@ class LlamaServiceManager:
             "[llama] launch cmd="
             + " ".join([f'"{x}"' if " " in x else x for x in cmd])
         )
+        self._tail_logs.clear()
+        self._pipe_threads = []
         self.process = subprocess.Popen(
             cmd,
             cwd=os.path.dirname(exe),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
         )
+        if self.process.stdout is not None:
+            t = threading.Thread(
+                target=self._pipe_pump, args=(self.process.stdout, "stdout"), daemon=True
+            )
+            t.start()
+            self._pipe_threads.append(t)
+        if self.process.stderr is not None:
+            t = threading.Thread(
+                target=self._pipe_pump, args=(self.process.stderr, "stderr"), daemon=True
+            )
+            t.start()
+            self._pipe_threads.append(t)
 
         deadline = time.time() + float(self.startup_timeout_sec)
         last_error = "starting"
@@ -239,7 +290,11 @@ class LlamaServiceManager:
                 break
             rc = self.process.poll()
             if rc is not None:
-                last_error = f"llama-server exited early with code {rc}"
+                tail = self._tail_summary()
+                if tail:
+                    last_error = f"llama-server exited early with code {rc}; tail={tail}"
+                else:
+                    last_error = f"llama-server exited early with code {rc}"
                 break
             ok, msg = self._embedding_healthcheck()
             if ok:
@@ -252,6 +307,9 @@ class LlamaServiceManager:
             time.sleep(1.0)
 
         self.stop()
+        tail = self._tail_summary()
+        if tail:
+            last_error = f"{last_error}; tail={tail}"
         raise RuntimeError(
             f"llama-server did not become healthy in {self.startup_timeout_sec}s: {last_error}"
         )
@@ -283,6 +341,11 @@ class LlamaServiceManager:
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait(timeout=5)
+            for t in self._pipe_threads:
+                try:
+                    t.join(timeout=0.5)
+                except Exception:
+                    pass
             _log(f"[llama] stopped rc={proc.returncode}")
         except Exception as exc:
             _log(f"[llama] stop error: {exc}")
