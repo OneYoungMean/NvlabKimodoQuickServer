@@ -14,12 +14,14 @@ $portFile = Join-Path $root "serverport"
 $logDir = Join-Path $root "log"
 $recycleDir = Join-Path $root "archive\recycle"
 $runLog = Join-Path $logDir "stress_run_server_cpu.log"
+$outputDir = Join-Path $logDir ("stress_outputs_cpu_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
 
 if (-not (Test-Path -LiteralPath $runBat)) { throw "Missing run_server.bat: $runBat" }
 if (-not (Test-Path -LiteralPath $ModelsRoot)) { throw "Models root not found: $ModelsRoot" }
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 New-Item -ItemType Directory -Path $recycleDir -Force | Out-Null
+New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 if (Test-Path -LiteralPath $portFile) {
     $bak = Join-Path $recycleDir ("serverport.stress.cpu.{0}.{1}" -f (Get-Date -Format "yyyyMMdd_HHmmss"), (Get-Random))
     Move-Item -LiteralPath $portFile -Destination $bak -Force
@@ -123,11 +125,28 @@ try {
         Send-Json $payload
         $ret = Read-UntilDone -timeoutSec 7200
         $sw.Stop()
+        $saved = ""
+        if (-not [string]::IsNullOrWhiteSpace($ret.last)) {
+            $responseFile = Join-Path $outputDir ("case_{0:D2}_response.json" -f $i)
+            Set-Content -LiteralPath $responseFile -Value $ret.last -Encoding UTF8
+            $saved = $responseFile
+            try {
+                $obj = $ret.last | ConvertFrom-Json -ErrorAction Stop
+                if ($null -ne $obj -and $null -ne $obj.motion_json_compact) {
+                    $motionFile = Join-Path $outputDir ("case_{0:D2}_motion.json" -f $i)
+                    Set-Content -LiteralPath $motionFile -Value ([string]$obj.motion_json_compact) -Encoding UTF8
+                    $saved = $motionFile
+                }
+            } catch {
+                # keep response file only
+            }
+        }
         $results += [pscustomobject]@{
             Index = $i
             Ok = $ret.ok
             Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 2)
             Last = $ret.last
+            Saved = $saved
         }
         if (-not $ret.ok) { break }
     }
@@ -137,11 +156,12 @@ try {
     Start-Sleep -Seconds 1
     try { $writer.Dispose(); $reader.Dispose(); $stream.Dispose(); $client.Close() } catch {}
 
-    $okCount = ($results | Where-Object { $_.Ok }).Count
+    $okCount = @($results | Where-Object { $_.Ok }).Count
     Write-Host ("[STRESS_CPU] host={0} port={1}" -f $svrHost, $svrPort)
     Write-Host ("[STRESS_CPU] total_sec={0} ok_count={1}" -f [math]::Round($totalSw.Elapsed.TotalSeconds, 2), $okCount)
+    Write-Host ("[STRESS_CPU] output_dir={0}" -f $outputDir)
     foreach ($r in $results) {
-        Write-Host ("[CASE] #{0} ok={1} sec={2}" -f $r.Index, $r.Ok, $r.Seconds)
+        Write-Host ("[CASE] #{0} ok={1} sec={2} saved={3}" -f $r.Index, $r.Ok, $r.Seconds, $r.Saved)
     }
 
     if ($okCount -lt $Count) {
@@ -153,4 +173,3 @@ finally {
         try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
     }
 }
-
