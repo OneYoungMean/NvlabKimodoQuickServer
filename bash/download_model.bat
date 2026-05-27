@@ -109,6 +109,9 @@ set "MODEL_REPO_URL_FALLBACK="
 if /I "%MODEL_REPO_NAME%"=="Kimodo-SOMA-RP-v1.1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.1"
 if /I "%MODEL_REPO_NAME%"=="Kimodo-SMPLX-RP-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SMPLX-RP-v1"
 if /I "%MODEL_REPO_NAME%"=="Kimodo-G1-RP-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-G1-RP-v1"
+if /I "%MODEL_REPO_NAME%"=="Kimodo-SOMA-SEED-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SOMA-SEED-v1"
+if /I "%MODEL_REPO_NAME%"=="Kimodo-SOMA-SEED-v1.1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SOMA-SEED-v1.1"
+if /I "%MODEL_REPO_NAME%"=="Kimodo-G1-SEED-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-G1-SEED-v1"
 call :ensure_repo_with_fallback "%MODEL_REPO_URL%" "%MODEL_REPO_URL_FALLBACK%" "%MODELS_DIR%\%MODEL_DIR_NAME%" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 

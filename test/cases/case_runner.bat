@@ -6,6 +6,7 @@ if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "TEST_DIR=%SCRIPT_DIR%\.."
 set "COPY_BAT=%TEST_DIR%\copy_to_test_timestamp.bat"
 set "DEST_INFO_FILE=%TEMP%\kimodo_case_dest_%RANDOM%%RANDOM%.txt"
+set "CASE_RECYCLE_ROOT=%TEST_DIR%\..\archive\case_recycle"
 
 if "%~1"=="" (
   echo [ERROR] Missing case name.
@@ -102,6 +103,9 @@ if /I "%CASE_NAME%"=="download_interrupt_once" call :warmup_setup || exit /b 1
 if /I "%CASE_NAME%"=="download_network_bad_once" call :warmup_setup || exit /b 1
 if /I "%CASE_NAME%"=="download_then_model_missing_once" call :warmup_setup || exit /b 1
 
+if /I "%CASE_NAME%"=="cpu_network_bad_once" call :check_setup_start_complete || call :archive_and_recopy_setup_env || exit /b 1
+if /I "%CASE_NAME%"=="download_then_model_missing_once" call :check_setup_start_complete || call :archive_and_recopy_setup_env || exit /b 1
+
 pushd "%RUN_ROOT%" >nul
 call "%TEST_BAT%"
 set "RC1=%ERRORLEVEL%"
@@ -178,6 +182,55 @@ if not "%WARMUP_SETUP_RC%"=="0" (
   call :write_result FAIL "warmup_setup_failed_rc_%WARMUP_SETUP_RC%"
   exit /b 1
 )
+exit /b 0
+
+:check_setup_start_complete
+if not defined RUN_ROOT exit /b 1
+if not exist "%RUN_ROOT%\log\setup.log" exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p='%RUN_ROOT%\log\setup.log'; if(-not (Test-Path $p)){ exit 1 }; $t=Get-Content -LiteralPath $p -Raw; if(($t -match '\[STEP\]\s+Build env') -and ($t -match '\[OK\]\s+setup complete\.')){ exit 0 } else { exit 1 }" >nul 2>nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:archive_and_recopy_setup_env
+if not defined RUN_ROOT exit /b 1
+if not exist "%RUN_ROOT%" exit /b 1
+if not exist "%CASE_RECYCLE_ROOT%" mkdir "%CASE_RECYCLE_ROOT%" >nul 2>nul
+set "TS=%DATE:~0,4%%DATE:~5,2%%DATE:~8,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
+set "TS=%TS: =0%"
+set "CASE_ARC=%CASE_RECYCLE_ROOT%\%CASE_NAME%_%TS%_%RANDOM%"
+move "%RUN_ROOT%" "%CASE_ARC%" >nul 2>nul
+if errorlevel 1 (
+  echo [WARN] Failed to archive run root: %RUN_ROOT%
+  exit /b 1
+)
+echo [WARN] setup start/complete validation failed, archived to: %CASE_ARC%
+if exist "%DEST_INFO_FILE%" move "%DEST_INFO_FILE%" "%DEST_INFO_FILE%.old.%RANDOM%" >nul 2>nul
+set "KIMODO_COPY_ONLY=1"
+set "KIMODO_COPY_DEST_FILE=%DEST_INFO_FILE%"
+call "%COPY_BAT%"
+set "COPY_RC=%ERRORLEVEL%"
+set "KIMODO_COPY_ONLY="
+set "KIMODO_COPY_DEST_FILE="
+if not "%COPY_RC%"=="0" exit /b 1
+if not exist "%DEST_INFO_FILE%" exit /b 1
+set "RUN_ROOT="
+set "TEST_MODELS_ROOT="
+for /f "usebackq tokens=1,* delims==" %%A in ("%DEST_INFO_FILE%") do (
+  if /I "%%A"=="DEST_DIR" set "RUN_ROOT=%%B"
+  if /I "%%A"=="TEST_MODELS_ROOT" set "TEST_MODELS_ROOT=%%B"
+)
+if not defined RUN_ROOT exit /b 1
+set "TEST_BAT=%RUN_ROOT%\example\example_run_server_tpose.bat"
+if not exist "%TEST_BAT%" exit /b 1
+if not exist "%RUN_ROOT%\log" mkdir "%RUN_ROOT%\log" >nul 2>nul
+pushd "%RUN_ROOT%" >nul
+call "%RUN_ROOT%\bash\setup.bat" --force --output file --log "%RUN_ROOT%\log\setup.log"
+set "REBOOT_SETUP_RC=%ERRORLEVEL%"
+popd >nul
+if not "%REBOOT_SETUP_RC%"=="0" exit /b 1
+call :check_setup_start_complete
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :write_result

@@ -11,7 +11,8 @@ set "PID_FILE=%ROOT_DIR%\log\example_run_server_tpose.pid"
 set "SERVER_LOG=%ROOT_DIR%\log\example_run_server_tpose_server.log"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%"
-if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=30"
+if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=600"
+set "WAIT_HINT_INTERVAL_SEC=10"
 
 set "MODEL=Kimodo-SOMA-RP-v1"
 if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
@@ -73,33 +74,31 @@ if errorlevel 1 (
 
 set /a WAIT_SEC=0
 :wait_serverport
-if exist "%PORT_FILE%" goto got_serverport
+if exist "%PORT_FILE%" (
+  call :read_serverport_retry
+  if not errorlevel 1 goto got_serverport
+)
+call :is_runserver_alive
+if errorlevel 1 (
+  echo [ERROR] run_server process exited before serverport became ready.
+  call :dump_startup_logs
+  exit /b 1
+)
 ping 127.0.0.1 -n 2 >nul
 set /a WAIT_SEC+=1
+set /a WAIT_MOD=WAIT_SEC %% WAIT_HINT_INTERVAL_SEC
+if !WAIT_MOD! equ 0 (
+  echo [TEST] waiting serverport... !WAIT_SEC!/%WAIT_TIMEOUT_SEC%s
+)
 if !WAIT_SEC! geq %WAIT_TIMEOUT_SEC% (
   echo [ERROR] serverport missing after !WAIT_SEC!s: %PORT_FILE%
+  call :dump_startup_logs
   call :kill_pid
   exit /b 1
 )
 goto wait_serverport
 
 :got_serverport
-set "HOST="
-set "PORT="
-for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
-  set "HOST=%%A"
-  set "PORT=%%B"
-)
-if not defined HOST (
-  echo [ERROR] invalid serverport content.
-  call :kill_pid
-  exit /b 1
-)
-if not defined PORT (
-  echo [ERROR] invalid serverport content.
-  call :kill_pid
-  exit /b 1
-)
 echo [TEST] TARGET=!HOST!:!PORT!
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%CLIENT_PS1%" -HostName "!HOST!" -Port !PORT! -Prompt "tpose" -Duration 5.0 -Seed 42 -DiffusionSteps 100 -ConstraintsJson ""
@@ -113,12 +112,9 @@ exit /b 0
 
 :quit_and_wait
 if exist "%PORT_FILE%" (
-  set "QHOST="
-  set "QPORT="
-  for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
-    set "QHOST=%%A"
-    set "QPORT=%%B"
-  )
+  call :read_serverport_retry
+  set "QHOST=!HOST!"
+  set "QPORT=!PORT!"
   if defined QHOST if defined QPORT (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
       "$ErrorActionPreference='SilentlyContinue'; $h='%QHOST%'; $p=[int]%QPORT%; $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if($iar.AsyncWaitHandle.WaitOne(1500)){ $c.EndConnect($iar); $s=$c.GetStream(); $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $w.WriteLine('{""cmd"":""quit""}'); $w.Close(); $s.Close() }; $c.Close();" >nul 2>nul
@@ -173,5 +169,55 @@ set "TS=%DATE:~0,4%%DATE:~5,2%%DATE:~8,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
 set "TS=%TS: =0%"
 set "BASE=%~nx1"
 set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
+set /a ARCH_TRY=0
+:archive_retry
 move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
+if not errorlevel 1 exit /b 0
+if not exist "%ARCHIVE_TARGET%" exit /b 0
+set /a ARCH_TRY+=1
+if !ARCH_TRY! geq 5 (
+  echo [WARN] archive skip (file busy): %ARCHIVE_TARGET%
+  exit /b 0
+)
+timeout /t 1 /nobreak >nul
+goto archive_retry
+exit /b 0
+
+:read_serverport_retry
+set "HOST="
+set "PORT="
+for /l %%R in (1,1,40) do (
+  if not exist "%PORT_FILE%" exit /b 1
+  set "HOST="
+  set "PORT="
+  for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
+    set "HOST=%%A"
+    set "PORT=%%B"
+  )
+  if defined HOST if defined PORT exit /b 0
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Milliseconds 150" >nul 2>nul
+)
+exit /b 1
+
+:is_runserver_alive
+if not exist "%PID_FILE%" exit /b 1
+set "RPID="
+for /f "usebackq delims=" %%A in ("%PID_FILE%") do (
+  if not defined RPID set "RPID=%%A"
+)
+if not defined RPID exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$pidValue='%RPID%'; if($pidValue -notmatch '^\d+$'){ exit 1 }; $p=Get-Process -Id ([int]$pidValue) -ErrorAction SilentlyContinue; if($null -eq $p){ exit 1 } else { exit 0 }" >nul 2>nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:dump_startup_logs
+echo [DIAG] tail: %ROOT_DIR%\log\setup.log
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%ROOT_DIR%\log\setup.log'){Get-Content '%ROOT_DIR%\log\setup.log' -Tail 40}" 2>nul
+echo [DIAG] tail: %ROOT_DIR%\log\download_model.log
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%ROOT_DIR%\log\download_model.log'){Get-Content '%ROOT_DIR%\log\download_model.log' -Tail 40}" 2>nul
+echo [DIAG] tail: %ROOT_DIR%\log\bridge_server.log
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%ROOT_DIR%\log\bridge_server.log'){Get-Content '%ROOT_DIR%\log\bridge_server.log' -Tail 40}" 2>nul
+echo [DIAG] tail: %SERVER_LOG%
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%SERVER_LOG%'){Get-Content '%SERVER_LOG%' -Tail 40}" 2>nul
 exit /b 0

@@ -118,7 +118,7 @@ if not exist "%VENV_PY%" (
   exit /b 1
 )
 set "PYTHONPATH=%SOURCE_ROOT%"
-"%VENV_PY%" -c "import numpy, kimodo, huggingface_hub, safetensors"
+"%VENV_PY%" -c "import numpy, kimodo, huggingface_hub, safetensors, motion_correction"
 if errorlevel 1 (
   echo [ERROR] Runtime import check failed.
   exit /b 1

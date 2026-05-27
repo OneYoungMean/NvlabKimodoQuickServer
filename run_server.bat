@@ -247,6 +247,13 @@ if not exist "%VENV_PY%" (
   echo [ERROR] Missing venv python: %VENV_PY%
   exit /b 1
 )
+echo [STEP] Preflight runtime import check...
+"%VENV_PY%" -c "import torch, kimodo, motion_correction; print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda))"
+if errorlevel 1 (
+  echo [ERROR] Runtime preflight failed: cannot import torch/kimodo/motion_correction.
+  echo [ERROR] Please rerun setup: bash\setup.bat --force --device cpu ^| cuda
+  exit /b 1
+)
 
 if not exist "%MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors" (
   echo [ERROR] Missing model file: %MODELS_ROOT%\%MODEL_DIR_NAME%\model.safetensors
