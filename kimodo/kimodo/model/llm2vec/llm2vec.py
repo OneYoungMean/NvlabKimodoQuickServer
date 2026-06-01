@@ -46,7 +46,7 @@ import torch
 import torch.multiprocessing as mp
 from peft import PeftModel
 from torch import Tensor, device, nn
-from tqdm.autonotebook import tqdm, trange
+from tqdm.autonotebook import tqdm as _tqdm, trange as _trange
 from transformers import (
     AutoConfig,
     AutoModel,
@@ -59,6 +59,9 @@ from transformers import (
 )
 
 logger = logging.getLogger(__name__)
+
+tqdm = partial(_tqdm, ascii=" =O")
+trange = partial(_trange, ascii=" =O")
 
 
 def batch_to_device(batch, target_device: device):

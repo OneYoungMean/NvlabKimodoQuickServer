@@ -3,11 +3,14 @@
 """Kimodo model: denoiser, text encoder, diffusion sampling, and post-processing."""
 
 import logging
+from functools import partial
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm as _tqdm
+
+tqdm = partial(_tqdm, ascii=" =O")
 
 from kimodo.constraints import EndEffectorConstraintSet, FullBodyConstraintSet
 from kimodo.motion_rep.feature_utils import compute_heading_angle, length_to_mask
