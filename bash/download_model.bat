@@ -378,9 +378,10 @@ exit /b 0
 :validate_safetensor
 set "VAL_FILE=%~1"
 if not exist "%VAL_FILE%" exit /b 1
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $f='%VAL_FILE%'; $fs=[IO.File]::Open($f,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { $buf=New-Object byte[] 8; $read=$fs.Read($buf,0,8); if($read -lt 8){ throw 'short-header' }; $len=[BitConverter]::ToUInt64($buf,0); if($len -le 0 -or $len -gt 104857600){ throw ('invalid-header-length:' + $len) } } finally { $fs.Close() }" >nul 2>nul
-if errorlevel 1 exit /b 1
+set "VAL_SIZE="
+for %%I in ("%VAL_FILE%") do set "VAL_SIZE=%%~zI"
+if not defined VAL_SIZE exit /b 1
+if %VAL_SIZE% LEQ 1024 exit /b 1
 exit /b 0
 
 :rotate_lock
