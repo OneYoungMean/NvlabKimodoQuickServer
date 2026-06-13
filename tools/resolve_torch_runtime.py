@@ -1,13 +1,10 @@
 import argparse
 import json
-import os
-import shutil
 import subprocess
-import sys
 import tempfile
+import os
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
 from torchruntime.device_db import get_gpus
 from torchruntime.installer import get_install_commands
@@ -19,26 +16,6 @@ def _run(cmd):
     if completed.returncode != 0:
         raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(cmd)}\n{completed.stdout}")
     return completed.stdout
-
-
-def _download_file(url: str, dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists() and dest.stat().st_size > 0:
-        return
-
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    headers = {"User-Agent": "Mozilla/5.0"}
-    if tmp.exists():
-        headers["Range"] = f"bytes={tmp.stat().st_size}-"
-
-    req = Request(url, headers=headers)
-    mode = "ab" if tmp.exists() else "wb"
-    with urlopen(req) as response, open(tmp, mode) as fp:
-        shutil.copyfileobj(response, fp, length=1024 * 1024)
-
-    if dest.exists():
-        dest.unlink()
-    tmp.replace(dest)
 
 
 def _extract_downloads(report_data):
@@ -71,6 +48,15 @@ def _strip_index_args(install_args: list[str]) -> list[str]:
             continue
         stripped.append(arg)
     return stripped
+
+
+def _run_pip_download(python_exe: str, install_args: list[str], cache_dir: Path) -> None:
+    cmd = [python_exe, "-m", "pip", "download", "--dest", str(cache_dir), "--only-binary", ":all:"]
+    cmd.extend(install_args)
+    print("[DOWNLOAD]", " ".join(cmd))
+    output = _run(cmd)
+    if output.strip():
+        print(output.rstrip())
 
 
 def _run_dry_run_report(python_exe: str, install_args: list[str], report_path: Path) -> dict:
@@ -122,16 +108,20 @@ def main() -> int:
             }
             plan["commands"].append(command_plan)
 
+            missing_downloads = []
             for item in downloads:
-                total_downloads += 1
-                file_name = Path(urlparse(item["url"]).path).name
+                file_name = Path(urlparse(item.get("url", "")).path).name
                 if not file_name:
                     continue
                 dest = cache_dir / file_name
                 if dest.exists() and dest.stat().st_size > 0:
                     continue
-                print(f"[DL] {item.get('name')} {item.get('version')} -> {dest.name}")
-                _download_file(item["url"], dest)
+                missing_downloads.append(item)
+
+            if missing_downloads:
+                total_downloads += len(missing_downloads)
+                print(f"[INFO] Resolving {len(missing_downloads)} wheel(s) via pip download...")
+                _run_pip_download(args.python, install_args, cache_dir)
 
     plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
