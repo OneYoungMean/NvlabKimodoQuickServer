@@ -59,6 +59,8 @@ set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
 set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
 set "UV_CACHE_DIR=%ROOT_DIR%\archive\uv_cache"
 set "UV_PYTHON_INSTALL_DIR=%ROOT_DIR%\archive\uv_python"
+set "TORCH_PLAN_FILE=%ROOT_DIR%\archive\torch_runtime_plan.json"
+set "TORCH_CACHE_DIR=%ROOT_DIR%\archive\torch_wheels"
 set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
 set "NETWORK_PROBE_TIMEOUT_SEC=%KIMODO_NETWORK_PROBE_TIMEOUT_SEC%"
 if not defined NETWORK_PROBE_TIMEOUT_SEC set "NETWORK_PROBE_TIMEOUT_SEC=1"
@@ -161,6 +163,8 @@ if not exist "%VENV_PY%" (
   exit /b 1
 )
 
+if not exist "%TORCH_CACHE_DIR%" mkdir "%TORCH_CACHE_DIR%" >nul 2>nul
+
 call :should_inject_once "setup_abort" "KIMODO_TEST_INJECT_SETUP_ABORT_ONCE"
 if "!INJECT_ONCE!"=="1" (
   echo [TEST] Injected setup interrupt once after venv creation.
@@ -222,9 +226,9 @@ if /I "%SETUP_DEVICE%"=="cpu" (
   echo [INFO] CPU mode: skip bitsandbytes/4-bit install by policy.
 ) else (
   echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
-  "%VENV_PY%" -m torchruntime install torch torchvision torchaudio
+  "%VENV_PY%" "%ROOT_DIR%\tools\resolve_torch_runtime.py" --python "%VENV_PY%" --cache-dir "%TORCH_CACHE_DIR%" --plan-file "%TORCH_PLAN_FILE%"
   if errorlevel 1 (
-    echo [ERROR] torchruntime failed to install CUDA-enabled torch packages.
+    echo [ERROR] torch runtime resolution/download failed.
     exit /b 1
   )
   call :validate_torch_env "cuda"
