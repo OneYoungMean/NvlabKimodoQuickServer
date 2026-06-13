@@ -172,9 +172,9 @@ if "!INJECT_ONCE!"=="1" (
 )
 
 echo [STEP] Seeding build helpers in venv...
-"%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" pip setuptools wheel
+"%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" pip setuptools wheel torchruntime
 if errorlevel 1 (
-  echo [ERROR] Failed to install build helpers pip/setuptools/wheel.
+  echo [ERROR] Failed to install build helpers pip/setuptools/wheel/torchruntime.
   exit /b 1
 )
 
@@ -199,17 +199,13 @@ if errorlevel 1 (
   echo [INFO] kimodo already usable, skip reinstall.
 )
 
-echo [STEP] Ensuring torchruntime helper...
+echo [STEP] Verifying torchruntime helper...
 "%VENV_PY%" -c "import torchruntime" >nul 2>nul
 if errorlevel 1 (
-  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" torchruntime
-  if errorlevel 1 (
-    echo [ERROR] Failed to install torchruntime.
-    exit /b 1
-  )
-) else (
-  echo [INFO] torchruntime already present, skip reinstall.
+  echo [ERROR] torchruntime helper missing after seed install.
+  exit /b 1
 )
+echo [INFO] torchruntime already present, skip reinstall.
 
 if /I "%SETUP_DEVICE%"=="cpu" (
   echo [STEP] Installing CPU-only torch runtime via uv...
