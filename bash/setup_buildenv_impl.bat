@@ -61,6 +61,8 @@ set "UV_CACHE_DIR=%ROOT_DIR%\archive\uv_cache"
 set "UV_PYTHON_INSTALL_DIR=%ROOT_DIR%\archive\uv_python"
 set "TORCH_PLAN_FILE=%ROOT_DIR%\archive\torch_runtime_plan.json"
 set "TORCH_CACHE_DIR=%ROOT_DIR%\archive\torch_wheels"
+set "LOCAL_WHEELS_DIR=%ROOT_DIR%\wheels"
+set "ANTLR4_WHEEL=%LOCAL_WHEELS_DIR%\antlr4_python3_runtime-4.9.3-py3-none-any.whl"
 set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
 set "NETWORK_PROBE_TIMEOUT_SEC=%KIMODO_NETWORK_PROBE_TIMEOUT_SEC%"
 if not defined NETWORK_PROBE_TIMEOUT_SEC set "NETWORK_PROBE_TIMEOUT_SEC=1"
@@ -178,12 +180,23 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [STEP] Installing local antlr4 runtime wheel...
+if not exist "%ANTLR4_WHEEL%" (
+  echo [ERROR] Missing required local wheel: %ANTLR4_WHEEL%
+  exit /b 1
+)
+"%UV_BIN%" pip install --python "%VENV_PY%" --no-index --find-links "%LOCAL_WHEELS_DIR%" --only-binary antlr4-python3-runtime antlr4-python3-runtime==4.9.3
+if errorlevel 1 (
+  echo [ERROR] Failed to install local antlr4 runtime wheel.
+  exit /b 1
+)
+
 echo [STEP] Installing kimodo package with uv pip (no git extras)...
 "%VENV_PY%" -c "import importlib.metadata as m; print(m.version('kimodo'))" >nul 2>nul
 if errorlevel 1 (
   pushd "%SOURCE_ROOT%" >nul
   set "SKIP_MOTION_CORRECTION_IN_SETUP=1"
-  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --editable . --no-build-isolation
+  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --find-links "%LOCAL_WHEELS_DIR%" --only-binary antlr4-python3-runtime --editable . --no-build-isolation
   set "KIMODO_INSTALL_RC=%ERRORLEVEL%"
   set "SKIP_MOTION_CORRECTION_IN_SETUP="
   popd >nul
