@@ -11,6 +11,7 @@ set "WATCHDOG_RUNTIME_INTERVAL_SEC=%~7"
 set "WATCHDOG_IDLE_NOLOG_MAX=%~8"
 set "COMMON_ENV_BAT=%ROOT_DIR%\bash\common_env.bat"
 set "WD_LOG_PATH=%ROOT_DIR%\log\bridge_message.log"
+set "WATCHDOG_LOG_PATH=%ROOT_DIR%\log\watchdog.log"
 set /a WD_FAILS=0
 set "WATCHDOG_STARTED_OK=0"
 set /a WD_LOG_STALE=0
@@ -20,8 +21,16 @@ if not defined WATCHDOG_INTERVAL_SEC set "WATCHDOG_INTERVAL_SEC=1"
 if not defined WATCHDOG_MAX_FAILS set "WATCHDOG_MAX_FAILS=180"
 if not defined WATCHDOG_RUNTIME_INTERVAL_SEC set "WATCHDOG_RUNTIME_INTERVAL_SEC=1"
 if not defined WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_MAX=300"
+if not exist "%ROOT_DIR%\log" mkdir "%ROOT_DIR%\log" >nul 2>nul
 
-echo [INFO] Bridge watchdog started. pid=%WD_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
+call :log [INFO] Bridge watchdog started. pid=%WD_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
+goto watchdog_tick
+
+:log
+set "LOG_LINE=%*"
+echo %LOG_LINE%
+>> "%WATCHDOG_LOG_PATH%" echo %LOG_LINE%
+exit /b 0
 
 :is_pid_running
 set "CHECK_PID=%~1"
@@ -55,10 +64,10 @@ exit /b 0
 call :is_pid_running "%WD_PID%"
 if errorlevel 1 (
   if "%WATCHDOG_STARTED_OK%"=="1" (
-    echo [INFO] Bridge process/thread invalid. pid=%WD_PID%
+    call :log [INFO] Bridge process/thread invalid. pid=%WD_PID%
     exit /b 0
   ) else (
-    echo [ERROR] Bridge process/thread invalid before serverport appeared. pid=%WD_PID%
+    call :log [ERROR] Bridge process/thread invalid before serverport appeared. pid=%WD_PID%
     exit /b 1
   )
 )
@@ -66,7 +75,7 @@ if errorlevel 1 (
 if "%WATCHDOG_STARTED_OK%"=="1" goto runtime_tick
 
 if exist "%PORT_FILE%" (
-  echo [INFO] serverport detected: %PORT_FILE%
+  call :log [INFO] serverport detected: %PORT_FILE%
   set "WATCHDOG_STARTED_OK=1"
   call :get_file_mtime_epoch "%WD_LOG_PATH%" WD_LOG_LAST
   if not defined WD_LOG_LAST set "WD_LOG_LAST=0"
@@ -76,12 +85,12 @@ if exist "%PORT_FILE%" (
 )
 
 set /a WD_FAILS+=1
-echo [INFO] Waiting serverport ^(!WD_FAILS!/%WATCHDOG_MAX_FAILS%^)
+call :log [INFO] Waiting serverport ^(!WD_FAILS!/%WATCHDOG_MAX_FAILS%^)
 if !WD_FAILS! geq %WATCHDOG_MAX_FAILS% (
-  echo [ERROR] serverport not found within %WATCHDOG_MAX_FAILS% checks. Killing pid=%WD_PID%
+  call :log [ERROR] serverport not found within %WATCHDOG_MAX_FAILS% checks. Killing pid=%WD_PID%
   call "%COMMON_ENV_BAT%" :kill_pid_if_kimodo_bridge "%WD_PID%"
   if errorlevel 1 (
-    echo [ERROR] Failed to kill bridge pid=%WD_PID%
+    call :log [ERROR] Failed to kill bridge pid=%WD_PID%
     exit /b 1
   )
   exit /b 1
@@ -99,10 +108,10 @@ if "%WD_LOG_NOW%"=="%WD_LOG_LAST%" (
   set "WD_LOG_LAST=%WD_LOG_NOW%"
 )
 if !WD_LOG_STALE! geq %WATCHDOG_IDLE_NOLOG_MAX% (
-  echo [INFO] No bridge log update for %WATCHDOG_IDLE_NOLOG_MAX% checks. Killing pid=%WD_PID%
+  call :log [INFO] No bridge log update for %WATCHDOG_IDLE_NOLOG_MAX% checks. Killing pid=%WD_PID%
   call "%COMMON_ENV_BAT%" :kill_pid_if_kimodo_bridge "%WD_PID%"
   if errorlevel 1 (
-    echo [ERROR] Failed to kill bridge pid=%WD_PID%
+    call :log [ERROR] Failed to kill bridge pid=%WD_PID%
     exit /b 1
   )
   exit /b 0

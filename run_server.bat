@@ -14,6 +14,7 @@ set "LOG_DIR=%ROOT_DIR%\log"
 set "LOG_NAME_RUN_SERVER=run_server.log"
 set "LOG_NAME_BRIDGE_SERVER=bridge_server.log"
 set "LOG_NAME_BRIDGE_MESSAGE=bridge_message.log"
+set "LOG_NAME_WATCHDOG=watchdog.log"
 set "LOG_NAME_SETUP=setup.log"
 set "LOG_NAME_DOWNLOAD=download_model.log"
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"
@@ -22,6 +23,7 @@ set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\%LOG_NAME_RUN_SERVER%"
 set "BOOTSTRAP_LOG_PATH=%LOG_DIR%\%LOG_NAME_BRIDGE_SERVER%"
 set "BRIDGE_MESSAGE_LOG_PATH=%LOG_DIR%\%LOG_NAME_BRIDGE_MESSAGE%"
+set "WATCHDOG_LOG_PATH=%LOG_DIR%\%LOG_NAME_WATCHDOG%"
 set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
 set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
 set "RESOLVE_MODEL_ALIAS_BAT=%ROOT_DIR%\bash\resolve_model_alias.bat"
@@ -334,11 +336,14 @@ if /I "%OUTPUT_MODE%"=="file" (
   echo [INFO] run_server log: %LOG_PATH%
   echo [INFO] bridge server log: %BOOTSTRAP_LOG_PATH%
   echo [INFO] bridge message log: %BRIDGE_MESSAGE_LOG_PATH%
+  echo [INFO] watchdog log: %WATCHDOG_LOG_PATH%
   type nul > "%LOG_PATH%"
   if exist "%BOOTSTRAP_LOG_PATH%" call "%COMMON_ENV_BAT%" :archive_file "%BOOTSTRAP_LOG_PATH%" "%RECYCLE_DIR%"
   type nul > "%BOOTSTRAP_LOG_PATH%"
   if exist "%BRIDGE_MESSAGE_LOG_PATH%" call "%COMMON_ENV_BAT%" :archive_file "%BRIDGE_MESSAGE_LOG_PATH%" "%RECYCLE_DIR%"
   type nul > "%BRIDGE_MESSAGE_LOG_PATH%"
+  if exist "%WATCHDOG_LOG_PATH%" call "%COMMON_ENV_BAT%" :archive_file "%WATCHDOG_LOG_PATH%" "%RECYCLE_DIR%"
+  type nul > "%WATCHDOG_LOG_PATH%"
 )
 
 if defined RUN_DEVICE (
