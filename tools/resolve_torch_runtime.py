@@ -69,12 +69,27 @@ def _run_dry_run_report(python_exe: str, install_args: list[str], report_path: P
     return json.loads(report_path.read_text(encoding="utf-8"))
 
 
+def _normalize_offline_args(install_args: list[str]) -> list[str]:
+    package_names = []
+    skip_next = False
+    for arg in install_args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--index-url", "--extra-index-url", "-i"):
+            skip_next = True
+            continue
+        package_names.append(arg)
+    return ["--force-reinstall", "--no-deps", *package_names]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--python", required=True)
     parser.add_argument("--cache-dir", required=True)
     parser.add_argument("--plan-file", required=True)
     parser.add_argument("--packages", nargs="*", default=["torch", "torchvision", "torchaudio"])
+    parser.add_argument("--force-platform", choices=["cpu", "cuda"])
     args = parser.parse_args()
 
     cache_dir = Path(args.cache_dir)
@@ -82,7 +97,9 @@ def main() -> int:
     plan_file = Path(args.plan_file)
     plan_file.parent.mkdir(parents=True, exist_ok=True)
 
-    torch_platform = get_torch_platform(get_gpus(), packages=args.packages)
+    detected_platform = get_torch_platform(get_gpus(), packages=args.packages)
+    torch_platform = "cpu" if args.force_platform == "cpu" else detected_platform
+    force_refresh = args.force_platform == "cuda"
     install_commands = get_install_commands(torch_platform, args.packages)
     plan = {
         "platform": torch_platform,
@@ -103,25 +120,30 @@ def main() -> int:
             downloads = _extract_downloads(report_data)
             command_plan = {
                 "install_args": install_args,
-                "offline_install_args": _strip_index_args(install_args),
+                "offline_install_args": _normalize_offline_args(_strip_index_args(install_args)),
                 "downloads": downloads,
             }
             plan["commands"].append(command_plan)
 
-            missing_downloads = []
-            for item in downloads:
-                file_name = Path(urlparse(item.get("url", "")).path).name
-                if not file_name:
-                    continue
-                dest = cache_dir / file_name
-                if dest.exists() and dest.stat().st_size > 0:
-                    continue
-                missing_downloads.append(item)
-
-            if missing_downloads:
-                total_downloads += len(missing_downloads)
-                print(f"[INFO] Resolving {len(missing_downloads)} wheel(s) via pip download...")
+            if force_refresh:
+                total_downloads += max(1, len(install_args))
+                print("[INFO] Force refresh enabled, downloading target wheels via pip download...")
                 _run_pip_download(args.python, install_args, cache_dir)
+            else:
+                missing_downloads = []
+                for item in downloads:
+                    file_name = Path(urlparse(item.get("url", "")).path).name
+                    if not file_name:
+                        continue
+                    dest = cache_dir / file_name
+                    if dest.exists() and dest.stat().st_size > 0:
+                        continue
+                    missing_downloads.append(item)
+
+                if missing_downloads:
+                    total_downloads += len(missing_downloads)
+                    print(f"[INFO] Resolving {len(missing_downloads)} wheel(s) via pip download...")
+                    _run_pip_download(args.python, install_args, cache_dir)
 
     plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 

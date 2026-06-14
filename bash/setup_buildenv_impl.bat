@@ -222,7 +222,7 @@ if /I "%SETUP_DEVICE%"=="cpu" (
   echo [INFO] CPU mode: skip bitsandbytes/4-bit install by policy.
 ) else (
   echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
-  "%VENV_PY%" "%ROOT_DIR%\tools\resolve_torch_runtime.py" --python "%VENV_PY%" --cache-dir "%TORCH_CACHE_DIR%" --plan-file "%TORCH_PLAN_FILE%"
+  "%VENV_PY%" "%ROOT_DIR%\tools\resolve_torch_runtime.py" --python "%VENV_PY%" --cache-dir "%TORCH_CACHE_DIR%" --plan-file "%TORCH_PLAN_FILE%" --force-platform cuda
   if errorlevel 1 (
     echo [ERROR] torch runtime resolution/download failed.
     exit /b 1

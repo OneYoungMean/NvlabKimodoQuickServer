@@ -6,7 +6,9 @@ if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "SOURCE_DIR=%SCRIPT_DIR%\.."
 for %%I in ("%SOURCE_DIR%") do set "SOURCE_DIR=%%~fI"
 set "TARGET_ROOT=%SOURCE_DIR%\recycle\test"
-set "TEST_BAT_REL=example\example_run_server_tpose.bat"
+set "TEST_BAT_REL=%~1"
+if not defined TEST_BAT_REL set "TEST_BAT_REL=%KIMODO_COPY_TEST_BAT_REL%"
+if not defined TEST_BAT_REL set "TEST_BAT_REL=example\example_run_server_tpose.bat"
 set "SHARED_MODELS_SRC=C:\nvlab\models"
 set "SHARED_MODELS_ALT=C:\nvlab\models~"
 set "TEST_MODELS_ROOT="
@@ -38,6 +40,7 @@ if errorlevel 1 (
 
 echo [INFO] SOURCE=%SOURCE_DIR%
 echo [INFO] DEST=%DEST_DIR%
+echo [INFO] TEST_BAT_REL=%TEST_BAT_REL%
 echo [STEP] Exporting git-tracked files from working tree...
 git -C "%SOURCE_DIR%" rev-parse --is-inside-work-tree >nul 2>nul
 if errorlevel 1 (
@@ -110,10 +113,12 @@ echo [INFO] Test models root: %TEST_MODELS_ROOT%
 if /I "%COPY_ONLY%"=="1" (
   echo [RESULT] DEST_DIR=%DEST_DIR%
   echo [RESULT] TEST_MODELS_ROOT=%TEST_MODELS_ROOT%
+  echo [RESULT] TEST_BAT_REL=%TEST_BAT_REL%
   if defined COPY_DEST_FILE (
     > "%COPY_DEST_FILE%" (
       echo DEST_DIR=%DEST_DIR%
       echo TEST_MODELS_ROOT=%TEST_MODELS_ROOT%
+      echo TEST_BAT_REL=%TEST_BAT_REL%
     )
     echo [INFO] Dest info file: %COPY_DEST_FILE%
   )
