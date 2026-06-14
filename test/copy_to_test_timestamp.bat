@@ -8,7 +8,6 @@ for %%I in ("%SOURCE_DIR%") do set "SOURCE_DIR=%%~fI"
 set "TARGET_ROOT=%SOURCE_DIR%\recycle\test"
 set "TEST_BAT_REL=%~1"
 if not defined TEST_BAT_REL set "TEST_BAT_REL=%KIMODO_COPY_TEST_BAT_REL%"
-if not defined TEST_BAT_REL set "TEST_BAT_REL=example\example_run_server_tpose.bat"
 set "SHARED_MODELS_SRC=C:\nvlab\models"
 set "SHARED_MODELS_ALT=C:\nvlab\models~"
 set "TEST_MODELS_ROOT="
@@ -19,6 +18,14 @@ set "COPY_DEST_FILE=%KIMODO_COPY_DEST_FILE%"
 if not exist "%SOURCE_DIR%" (
   echo [ERROR] Source directory not found: %SOURCE_DIR%
   exit /b 1
+)
+if not defined TEST_BAT_REL (
+  if /I "%COPY_ONLY%"=="1" (
+    set "TEST_BAT_REL=example\example_run_server_tpose.bat"
+  ) else (
+    call :pick_test_bat TEST_BAT_REL
+    if errorlevel 1 exit /b 1
+  )
 )
 if not exist "%TARGET_ROOT%" (
   mkdir "%TARGET_ROOT%" >nul 2>nul
@@ -140,3 +147,51 @@ call "%DEST_TEST_BAT%"
 set "TEST_RC=%ERRORLEVEL%"
 echo [INFO] Test exit code: %TEST_RC%
 exit /b %TEST_RC%
+
+:pick_test_bat
+set "OUT_VAR=%~1"
+set "IDX=0"
+echo.
+echo ===== Select Test =====
+call :add_test_dir "%SOURCE_DIR%\test" "test" "copy_to_test_timestamp.bat"
+call :add_test_dir "%SOURCE_DIR%\test\cases" "test\cases" ""
+if %IDX% LEQ 0 (
+  echo [ERROR] No test entries found.
+  exit /b 1
+)
+echo.
+set /p "CHOICE=Enter number: "
+if not defined CHOICE (
+  echo [ERROR] Empty selection.
+  exit /b 1
+)
+for /f "delims=0123456789" %%A in ("%CHOICE%") do (
+  echo [ERROR] Invalid selection: %CHOICE%
+  exit /b 1
+)
+call set "SELECTED_TEST_REL=%%ITEM_REL[%CHOICE%]%%"
+if not defined SELECTED_TEST_REL (
+  echo [ERROR] Selection out of range: %CHOICE%
+  exit /b 1
+)
+set "%OUT_VAR%=%SELECTED_TEST_REL%"
+echo [INFO] Selected test: %SELECTED_TEST_REL%
+exit /b 0
+
+:add_test_dir
+set "LIST_DIR=%~1"
+set "DISPLAY_PREFIX=%~2"
+set "SKIP_NAME=%~3"
+if not exist "%LIST_DIR%" exit /b 0
+for /f "delims=" %%F in ('dir /b /a-d "%LIST_DIR%\*.bat" 2^>nul') do (
+  if /I not "%%~nxF"=="%SKIP_NAME%" (
+    set /a IDX+=1
+    if /I "%DISPLAY_PREFIX%"=="test" (
+      set "ITEM_REL[!IDX!]=test\%%F"
+    ) else (
+      set "ITEM_REL[!IDX!]=test\cases\%%F"
+    )
+    echo   [!IDX!] %DISPLAY_PREFIX%\%%F
+  )
+)
+exit /b 0
