@@ -99,7 +99,7 @@ def main() -> int:
 
     detected_platform = get_torch_platform(get_gpus(), packages=args.packages)
     torch_platform = "cpu" if args.force_platform == "cpu" else detected_platform
-    force_refresh = args.force_platform == "cuda"
+    force_refresh = args.force_platform is not None or detected_platform != "cpu"
     install_commands = get_install_commands(torch_platform, args.packages)
     plan = {
         "platform": torch_platform,
@@ -107,7 +107,7 @@ def main() -> int:
         "commands": [],
     }
 
-    if torch_platform == "cpu":
+    if torch_platform == "cpu" and args.force_platform is None:
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
         print(f"[INFO] torch platform={torch_platform}, nothing to download.")
         return 0

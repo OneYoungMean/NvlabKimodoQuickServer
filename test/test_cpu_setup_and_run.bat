@@ -34,7 +34,8 @@ call :archive_file "%RUN_PID_FILE%"
 call :archive_file "%PORT_FILE%"
 
 echo [STEP] setup cpu mode...
-call "%ROOT_DIR%\bash\setup.bat" --device cpu --output file --log "%SETUP_LOG%"
+set "KIMODO_TEST_SETUP_DEVICE=cpu"
+call "%ROOT_DIR%\bash\setup.bat" --output file --log "%SETUP_LOG%"
 if errorlevel 1 (
   echo [ERROR] setup cpu failed.
   if exist "%SETUP_LOG%" powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%SETUP_LOG%' -Tail 120"

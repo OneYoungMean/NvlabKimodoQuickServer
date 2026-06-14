@@ -222,12 +222,7 @@ if exist "%PORT_FILE%" (
   call "%COMMON_ENV_BAT%" :archive_file "%PORT_FILE%" "%RECYCLE_DIR%"
 )
 
-set "SETUP_DEVICE_ARG="
-if defined RUN_DEVICE (
-  if /I "%RUN_DEVICE%"=="cpu" set "SETUP_DEVICE_ARG=cpu"
-  if /I "%RUN_DEVICE:~0,4%"=="cuda" set "SETUP_DEVICE_ARG=cuda"
-)
-call "%RUN_SETUP_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_VENV%" "%SETUP_SENTINEL%" "%SETUP_BAT%" "%LOG_DIR%\%LOG_NAME_SETUP%" "%SETUP_DEVICE_ARG%"
+call "%RUN_SETUP_PHASE_BAT%" "%ROOT_DIR%" "%OUTPUT_MODE%" "%USING_EXTERNAL_VENV%" "%SETUP_SENTINEL%" "%SETUP_BAT%" "%LOG_DIR%\%LOG_NAME_SETUP%"
 if errorlevel 1 exit /b 1
 
 if defined RUN_DEVICE (
@@ -251,7 +246,7 @@ echo [STEP] Preflight runtime import check...
 "%VENV_PY%" -c "import torch, kimodo, motion_correction; print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda))"
 if errorlevel 1 (
   echo [ERROR] Runtime preflight failed: cannot import torch/kimodo/motion_correction.
-  echo [ERROR] Please rerun setup: bash\setup.bat --force --device cpu ^| cuda
+  echo [ERROR] Please rerun setup from auto mode.
   exit /b 1
 )
 

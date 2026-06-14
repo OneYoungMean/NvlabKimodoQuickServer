@@ -20,13 +20,7 @@ if "%USING_EXTERNAL_VENV%"=="1" (
 
 if not exist "%SETUP_SENTINEL%" (
   echo [STEP] setup not found, running setup...
-  if not defined SETUP_DEVICE set "SETUP_DEVICE=%KIMODO_SETUP_DEVICE%"
-  if /I not "%SETUP_DEVICE%"=="cpu" if /I not "%SETUP_DEVICE%"=="cuda" set "SETUP_DEVICE="
-  if defined SETUP_DEVICE (
-    call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%SETUP_LOG_PATH%" --device %SETUP_DEVICE%
-  ) else (
-    call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%SETUP_LOG_PATH%"
-  )
+  call "%SETUP_BAT%" --output %OUTPUT_MODE% --log "%SETUP_LOG_PATH%"
   if errorlevel 1 exit /b 1
 )
 

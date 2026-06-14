@@ -55,7 +55,8 @@ if exist "%RUN_LOG%" del /f /q "%RUN_LOG%" >nul 2>nul
 if exist "%CLIENT_LOG%" del /f /q "%CLIENT_LOG%" >nul 2>nul
 
 echo [STEP] setup cpu
-call "%ROOT_DIR%\bash\setup.bat" --device cpu --output file --log "%SETUP_LOG%"
+set "KIMODO_TEST_SETUP_DEVICE=cpu"
+call "%ROOT_DIR%\bash\setup.bat" --output file --log "%SETUP_LOG%"
 if errorlevel 1 (
   echo [ERROR] setup failed
   powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%SETUP_LOG%'){ Get-Content '%SETUP_LOG%' -Tail 120 }"

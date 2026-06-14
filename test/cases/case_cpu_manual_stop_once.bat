@@ -10,7 +10,7 @@ set "COPY_BAT=%TEST_DIR%\copy_to_test_timestamp.bat"
 set "DEST_INFO_FILE=%TEMP%\kimodo_case_cpu_manual_stop_dest_%RANDOM%%RANDOM%.txt"
 
 set "KIMODO_TEST_DEVICE=cpu"
-set "KIMODO_SETUP_DEVICE=cpu"
+set "KIMODO_TEST_SETUP_DEVICE=cpu"
 set "KIMODO_COPY_ONLY=1"
 set "KIMODO_COPY_DEST_FILE=%DEST_INFO_FILE%"
 call "%COPY_BAT%"
@@ -65,7 +65,8 @@ if exist "%RUN_ROOT%\log\example_run_server_tpose.pid" move "%RUN_ROOT%\log\exam
 if exist "%RUN_ROOT%\serverport" move "%RUN_ROOT%\serverport" "%RUN_ROOT%\archive\recycle\serverport.manual.%RANDOM%%RANDOM%" >nul 2>nul
 
 pushd "%RUN_ROOT%" >nul
-call "%RUN_ROOT%\bash\setup.bat" --force --device cpu --output file --log "%RUN_ROOT%\log\setup.log"
+set "KIMODO_TEST_SETUP_DEVICE=cpu"
+call "%RUN_ROOT%\bash\setup.bat" --force --output file --log "%RUN_ROOT%\log\setup.log"
 set "RECOVER_SETUP_RC=%ERRORLEVEL%"
 popd >nul
 if not "%RECOVER_SETUP_RC%"=="0" goto fail_setup_recover

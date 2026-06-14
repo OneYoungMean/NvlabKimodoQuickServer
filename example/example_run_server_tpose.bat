@@ -43,15 +43,9 @@ if not exist "%CLIENT_PS1%" (
 if not exist "%ROOT_DIR%\log" mkdir "%ROOT_DIR%\log" >nul 2>nul
 if not exist "%RECYCLE_DIR%" mkdir "%RECYCLE_DIR%" >nul 2>nul
 
+set "KIMODO_TEST_SETUP_DEVICE="
 if defined KIMODO_TEST_DEVICE (
-  if /I "%KIMODO_TEST_DEVICE%"=="cpu" (
-    if defined KIMODO_SETUP_DEVICE (
-      if /I not "%KIMODO_SETUP_DEVICE%"=="cpu" (
-        echo [WARN] Aligning KIMODO_SETUP_DEVICE to cpu for test consistency.
-      )
-    )
-    set "KIMODO_SETUP_DEVICE=cpu"
-  )
+  if /I "%KIMODO_TEST_DEVICE%"=="cpu" set "KIMODO_TEST_SETUP_DEVICE=cpu"
 )
 
 echo [TEST] ROOT_DIR=%ROOT_DIR%

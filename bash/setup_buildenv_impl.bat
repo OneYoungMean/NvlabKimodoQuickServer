@@ -68,8 +68,8 @@ set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=%KIMODO_NETWORK_FALLBACK_HEAD_TIMEOUT_SEC
 if not defined NETWORK_FALLBACK_HEAD_TIMEOUT_SEC set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=3"
 set "PYTHON_SPEC="
 set "INJECT_ONCE=0"
-set "SETUP_DEVICE=%KIMODO_SETUP_DEVICE%"
-if not defined SETUP_DEVICE set "SETUP_DEVICE=cuda"
+set "SETUP_DEVICE=%KIMODO_TEST_SETUP_DEVICE%"
+if not defined SETUP_DEVICE set "SETUP_DEVICE="
 set "BITSANDBYTES_REQUIRED=0.49.2"
 
 if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
@@ -206,14 +206,21 @@ if errorlevel 1 (
   exit /b 1
 )
 echo [INFO] torchruntime already present, skip reinstall.
-
+set "TORCH_FORCE_ARG="
+set "TORCH_VALIDATE_MODE=cuda"
 if /I "%SETUP_DEVICE%"=="cpu" (
-  echo [STEP] Installing CPU-only torch runtime via uv...
-  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "torch>=2.5" "torchvision>=0.20" "torchaudio>=2.5"
-  if errorlevel 1 (
-    echo [ERROR] Failed to install CPU torch packages.
-    exit /b 1
-  )
+  set "TORCH_FORCE_ARG=--force-platform cpu"
+  set "TORCH_VALIDATE_MODE=cpu"
+  echo [STEP] Installing CPU-only torch runtime via torchruntime...
+) else (
+  echo [STEP] Installing torch runtime via torchruntime - auto-detect...
+)
+"%VENV_PY%" "%ROOT_DIR%\tools\resolve_torch_runtime.py" --python "%VENV_PY%" --cache-dir "%TORCH_CACHE_DIR%" --plan-file "%TORCH_PLAN_FILE%" %TORCH_FORCE_ARG%
+if errorlevel 1 (
+  echo [ERROR] torch runtime resolution/download failed.
+  exit /b 1
+)
+if /I "%TORCH_VALIDATE_MODE%"=="cpu" (
   call :validate_torch_env "cpu"
   if errorlevel 1 (
     echo [ERROR] CPU torch runtime validation failed.
@@ -221,12 +228,6 @@ if /I "%SETUP_DEVICE%"=="cpu" (
   )
   echo [INFO] CPU mode: skip bitsandbytes/4-bit install by policy.
 ) else (
-  echo [STEP] Installing CUDA-enabled torch runtime via torchruntime...
-  "%VENV_PY%" "%ROOT_DIR%\tools\resolve_torch_runtime.py" --python "%VENV_PY%" --cache-dir "%TORCH_CACHE_DIR%" --plan-file "%TORCH_PLAN_FILE%" --force-platform cuda
-  if errorlevel 1 (
-    echo [ERROR] torch runtime resolution/download failed.
-    exit /b 1
-  )
   call :validate_torch_env "cuda"
   if errorlevel 1 (
     echo [ERROR] CUDA torch runtime validation failed.
@@ -387,7 +388,7 @@ if /I "%VALIDATE_MODE%"=="cpu" (
   "%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0)"
   if errorlevel 1 (
     echo [ERROR] Python environment is abnormal for CPU runtime.
-    echo [ERROR] Please reinstall setup: bash\setup.bat --force --device cpu
+    echo [ERROR] Please reinstall setup from the test path with CPU mode.
     exit /b 1
   )
   exit /b 0
@@ -396,7 +397,7 @@ echo [STEP] Validating CUDA torch runtime...
 "%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if (torch.cuda.is_available() and torch.version.cuda is not None) else 2)"
 if errorlevel 1 (
   echo [ERROR] Python environment is abnormal for CUDA runtime.
-  echo [ERROR] Please reinstall setup: bash\setup.bat --force --device cuda
+  echo [ERROR] Please reinstall setup with auto mode.
   exit /b 1
 )
 exit /b 0

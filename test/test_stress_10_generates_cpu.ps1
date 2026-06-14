@@ -28,6 +28,7 @@ if (Test-Path -LiteralPath $portFile) {
 }
 
 $env:KIMODO_CPU_TEXT_ENCODER = "gguf"
+$env:KIMODO_TEST_SETUP_DEVICE = "cpu"
 $runCmd = "call `"$runBat`" --model `"$ModelName`" --device cpu --models-root `"$ModelsRoot`" --output file --log `"$runLog`""
 $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/c", $runCmd) -WorkingDirectory $root -WindowStyle Normal -PassThru
 

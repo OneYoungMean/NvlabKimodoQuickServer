@@ -60,7 +60,8 @@ foreach ($f in @($setupLog, $runLog, $clientLog, $portFile)) {
 }
 
 Write-Host "[STEP] setup cpu"
-& $setupBat --device cpu --output file --log $setupLog
+$env:KIMODO_TEST_SETUP_DEVICE = "cpu"
+& $setupBat --output file --log $setupLog
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] setup failed"
     if (Test-Path -LiteralPath $setupLog) { Get-Content -LiteralPath $setupLog -Tail 120 }
