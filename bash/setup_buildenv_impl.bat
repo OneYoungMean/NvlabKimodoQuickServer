@@ -197,6 +197,11 @@ if "%TORCH_FORCE_CPU%"=="1" (
   )
 
   call "%VENV_DIR%\Scripts\activate.bat" >nul 2>nul
+  echo [STEP] Removing any pre-existing torch so torchruntime can install the CUDA build...
+  "%VENV_PY%" -c "import torch" >nul 2>nul
+  if not errorlevel 1 (
+    "%UV_BIN%" pip uninstall --python "%VENV_PY%" torch torchvision torchaudio >nul 2>nul
+  )
   echo [STEP] Installing torch runtime via torchruntime --uv...
   "%VENV_PY%" -m torchruntime install --uv torch torchvision torchaudio
   if errorlevel 1 (
