@@ -184,31 +184,28 @@ if "%TORCH_FORCE_CPU%"=="1" (
   )
   echo [INFO] CPU mode: skip bitsandbytes/4-bit install by policy.
 ) else (
-  echo [STEP] Ensuring torchruntime helper...
-  "%VENV_PY%" -c "import torchruntime" >nul 2>nul
-  if errorlevel 1 (
-    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" torchruntime
-    if errorlevel 1 (
-      echo [ERROR] Failed to install torchruntime.
-      exit /b 1
-    )
-  ) else (
-    echo [INFO] torchruntime already present, skip reinstall.
-  )
-
   call "%VENV_DIR%\Scripts\activate.bat" >nul 2>nul
-  echo [STEP] Removing any pre-existing torch so torchruntime can install the CUDA build...
+  echo [STEP] Removing any pre-existing torch so the CUDA build can be installed...
   "%VENV_PY%" -c "import torch" >nul 2>nul
   if not errorlevel 1 (
     "%UV_BIN%" pip uninstall --python "%VENV_PY%" torch torchvision torchaudio >nul 2>nul
   )
-  echo [STEP] Installing torch runtime via torchruntime --uv...
-  rem Pin to 2.11.x: cu128 index has no torch 2.12 win/cp312 wheel, and an
-  rem unpinned resolve leaks across the PyPI mirror and falls back to 2.12.0+cpu.
-  "%VENV_PY%" -m torchruntime install --uv torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0
+  rem Install the CUDA build directly from the cu128 index. We deliberately do NOT
+  rem use torchruntime here: it misdetects the platform as cu124 for pinned 2.11.x
+  rem (cu124 has no 2.11 win/cp312 wheel), and the PyPI mirror in UV_DEFAULT_INDEX
+  rem leaks in as an extra index, both of which silently resolve to 2.11.0+cpu.
+  rem The install runs in :install_cuda_torch with the index env vars cleared so
+  rem cu128 is the SOLE index; setlocal there keeps that scoped to the torch step.
+  echo [STEP] Installing CUDA torch runtime from cu128 index...
+  call :install_cuda_torch
   if errorlevel 1 (
-    echo [ERROR] Torch runtime install failed.
+    echo [ERROR] CUDA torch runtime install failed.
     exit /b 1
+  )
+  echo [STEP] Installing triton-windows...
+  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" triton-windows
+  if errorlevel 1 (
+    echo [WARN] triton-windows install failed; torch.compile/Triton kernels may be unavailable.
   )
   call :validate_torch_env "cuda"
   if errorlevel 1 (
@@ -379,6 +376,25 @@ if not exist "%LLAMA_SERVER_EXE%" (
 )
 echo [ERROR] local llama-server exists but is not executable: %LLAMA_SERVER_EXE%
 exit /b 1
+
+:install_cuda_torch
+rem Isolate index env vars so cu128 is the only index uv sees. uv treats
+rem UV_DEFAULT_INDEX (the PyPI mirror) as an additional index even when
+rem --index-url is given, which would let it resolve torch to a +cpu wheel.
+rem setlocal scopes the cleared vars to this call; endlocal on exit restores them.
+setlocal
+set "UV_DEFAULT_INDEX="
+set "UV_INDEX_URL="
+set "UV_EXTRA_INDEX_URL="
+set "PIP_INDEX_URL="
+set "PIP_EXTRA_INDEX_URL="
+"%UV_BIN%" pip install --python "%VENV_PY%" --index-url https://download.pytorch.org/whl/cu128 --reinstall-package torch --reinstall-package torchvision --reinstall-package torchaudio torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0
+if errorlevel 1 (
+  endlocal
+  exit /b 1
+)
+endlocal
+exit /b 0
 
 :validate_torch_env
 set "VALIDATE_MODE=%~1"
