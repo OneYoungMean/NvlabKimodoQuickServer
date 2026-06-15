@@ -203,7 +203,9 @@ if "%TORCH_FORCE_CPU%"=="1" (
     "%UV_BIN%" pip uninstall --python "%VENV_PY%" torch torchvision torchaudio >nul 2>nul
   )
   echo [STEP] Installing torch runtime via torchruntime --uv...
-  "%VENV_PY%" -m torchruntime install --uv torch torchvision torchaudio
+  rem Pin to 2.11.x: cu128 index has no torch 2.12 win/cp312 wheel, and an
+  rem unpinned resolve leaks across the PyPI mirror and falls back to 2.12.0+cpu.
+  "%VENV_PY%" -m torchruntime install --uv torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0
   if errorlevel 1 (
     echo [ERROR] Torch runtime install failed.
     exit /b 1
