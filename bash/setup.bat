@@ -13,6 +13,13 @@ set "LOCK_FILE=!ROOT_DIR!\.setup.lock"
 set "SENTINEL=!ROOT_DIR!\.setup.complete"
 set "SETUP_BUILD_IMPL=!ROOT_DIR!\bash\setup_buildenv_impl.bat"
 set "RECYCLE_DIR=!ROOT_DIR!\archive\recycle"
+set "REQUESTED_SETUP_MODE=%KIMODO_SETUP_DEVICE%"
+if not defined REQUESTED_SETUP_MODE set "REQUESTED_SETUP_MODE=%KIMODO_TEST_SETUP_DEVICE%"
+if /I "!REQUESTED_SETUP_MODE!"=="cpu" (
+  set "REQUESTED_SETUP_MODE=cpu"
+) else (
+  set "REQUESTED_SETUP_MODE=auto"
+)
 
 :parse_args
 if "%~1"=="" goto parsed
@@ -44,6 +51,7 @@ if not defined SOURCE_ROOT (
   exit /b 1
 )
 if not exist "!LOG_DIR!" mkdir "!LOG_DIR!" >nul 2>nul
+set "KIMODO_SETUP_DEVICE=!REQUESTED_SETUP_MODE!"
 
 if exist "!LOCK_FILE!" (
   echo [ERROR] setup already running: !LOCK_FILE!
@@ -52,14 +60,21 @@ if exist "!LOCK_FILE!" (
 
 if exist "!SENTINEL!" (
   set "SENTINEL_DEVICE="
+  set "SENTINEL_TORCH_RUNTIME="
   for /f "usebackq tokens=1,* delims==" %%A in ("!SENTINEL!") do (
     if /I "%%A"=="setup_mode" set "SENTINEL_DEVICE=%%B"
+    if /I "%%A"=="torch_runtime" set "SENTINEL_TORCH_RUNTIME=%%B"
   )
-  if /I "!SENTINEL_DEVICE!"=="auto" (
-    echo [INFO] setup already completed: !SENTINEL!
+  if /I "!SENTINEL_DEVICE!"=="!REQUESTED_SETUP_MODE!" (
+    if defined SENTINEL_TORCH_RUNTIME (
+      echo [INFO] setup already completed: !SENTINEL! ^(mode=!SENTINEL_DEVICE!, torch=!SENTINEL_TORCH_RUNTIME!^)
+    ) else (
+      echo [INFO] setup already completed: !SENTINEL! ^(mode=!SENTINEL_DEVICE!^)
+    )
     exit /b 0
   )
-  echo [INFO] setup sentinel mode mismatch ^(found=!SENTINEL_DEVICE!, want=auto^), re-running setup.
+  if not defined SENTINEL_DEVICE set "SENTINEL_DEVICE=unknown"
+  echo [INFO] setup sentinel mode mismatch ^(found=!SENTINEL_DEVICE!, want=!REQUESTED_SETUP_MODE!^), re-running setup.
   call :archive_file "!SENTINEL!"
 )
 
@@ -83,7 +98,7 @@ exit /b %RC%
 
 :main
 echo [STEP] Build env (single-thread)...
-echo [INFO] setup mode: auto
+echo [INFO] setup mode: !REQUESTED_SETUP_MODE!
 if not exist "!SETUP_BUILD_IMPL!" (
   echo [ERROR] Missing build impl: !SETUP_BUILD_IMPL!
   exit /b 1
@@ -110,9 +125,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+set "TORCH_RUNTIME=unknown"
+for /f "usebackq delims=" %%I in (`"!VENV_PY!" -c "import torch; print('cuda' if torch.version.cuda is not None else 'cpu')"` ) do (
+  if not defined TORCH_RUNTIME set "TORCH_RUNTIME=%%I"
+)
+if not defined TORCH_RUNTIME set "TORCH_RUNTIME=unknown"
+
 > "!SENTINEL!" (
   echo setup_time=%DATE% %TIME%
-  echo setup_mode=auto
+  echo setup_mode=!REQUESTED_SETUP_MODE!
+  echo torch_runtime=!TORCH_RUNTIME!
   echo root_dir=!ROOT_DIR!
   echo source_root=!SOURCE_ROOT!
 )

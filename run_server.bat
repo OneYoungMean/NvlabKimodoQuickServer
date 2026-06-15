@@ -51,6 +51,7 @@ set "VENV_PY="
 set "USING_EXTERNAL_MODELS=0"
 set "USING_EXTERNAL_VENV=0"
 set "RUN_DEVICE="
+set "SETUP_DEVICE_MODE=auto"
 set "TEXT_ENCODER_DEVICE_MODE=%TEXT_ENCODER_DEVICE%"
 set "CONFIG_ONLY=%KIMODO_CONFIG_ONLY%"
 if not defined CONFIG_ONLY set "CONFIG_ONLY=0"
@@ -190,6 +191,7 @@ if "%USING_EXTERNAL_VENV%"=="0" (
 )
 if defined RUN_DEVICE (
   if /I "!RUN_DEVICE!"=="cpu" (
+    set "SETUP_DEVICE_MODE=cpu"
     set "TEXT_ENCODER_DEVICE_MODE=cpu"
   ) else (
     if /I "!RUN_DEVICE!"=="cuda" (
@@ -208,6 +210,7 @@ if defined RUN_DEVICE (
 ) else (
   if not defined TEXT_ENCODER_DEVICE_MODE set "TEXT_ENCODER_DEVICE_MODE=auto"
 )
+echo [INFO] Expected setup mode: !SETUP_DEVICE_MODE!
 
 if /I "%HIGHVRAM%"=="1" (
   set "KIMODO_LLM2VEC_DIR=!MODELS_ROOT!\Meta-Llama-3-8B-Instruct"
@@ -224,7 +227,7 @@ if exist "!PORT_FILE!" (
   call "!COMMON_ENV_BAT!" :archive_file "!PORT_FILE!" "!RECYCLE_DIR!"
 )
 
-call "!RUN_SETUP_PHASE_BAT!" "!ROOT_DIR!" "!OUTPUT_MODE!" "!USING_EXTERNAL_VENV!" "!SETUP_SENTINEL!" "!SETUP_BAT!" "!LOG_DIR!\!LOG_NAME_SETUP!"
+call "!RUN_SETUP_PHASE_BAT!" "!ROOT_DIR!" "!OUTPUT_MODE!" "!USING_EXTERNAL_VENV!" "!SETUP_SENTINEL!" "!SETUP_BAT!" "!LOG_DIR!\!LOG_NAME_SETUP!" "!SETUP_DEVICE_MODE!"
 if errorlevel 1 exit /b 1
 
 if defined RUN_DEVICE (
