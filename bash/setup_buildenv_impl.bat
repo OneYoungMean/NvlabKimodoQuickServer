@@ -8,7 +8,6 @@ set "SOURCE_ROOT="
 set "LOCK_FILE=%ROOT_DIR%\.setup.lock"
 set "RUN_MARKER=%ROOT_DIR%\run"
 set "SETUP_LOG=%ROOT_DIR%\log\setup_buildenv_impl.log"
-set "NETWORK_PROBE_PS1=%ROOT_DIR%\bash\probe_network_env.ps1"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "RECOVERY_FLAG_DIR=%ROOT_DIR%\archive\recovery_flags"
 set "LLAMA_DIR=%ROOT_DIR%\program\exe\llama"
@@ -54,25 +53,17 @@ exit /b %SETUP_EXIT%
 
 :run_setup
 set "UV_BIN=%ROOT_DIR%\program\exe\uv\uv.exe"
-set "UV_DEFAULT_INDEX=https://pypi.org/simple"
-set "UV_INDEX_CANDIDATE_CN=https://mirrors.aliyun.com/pypi/simple/"
-set "UV_INDEX_CANDIDATE_GLOBAL=https://pypi.org/simple"
+set "UV_CONFIG_FILE=%ROOT_DIR%\uv.toml"
 set "UV_CACHE_DIR=%ROOT_DIR%\archive\uv_cache"
 set "UV_PYTHON_INSTALL_DIR=%ROOT_DIR%\archive\uv_python"
-set "TORCH_PLAN_FILE=%ROOT_DIR%\archive\torch_runtime_plan.json"
-set "TORCH_CACHE_DIR=%ROOT_DIR%\archive\torch_wheels"
 set "LOCAL_WHEELS_DIR=%ROOT_DIR%\wheels"
 set "ANTLR4_WHEEL=%LOCAL_WHEELS_DIR%\antlr4_python3_runtime-4.9.3-py3-none-any.whl"
-set "NETWORK_ENV_CMD=%TEMP%\kimodo_probe_env_%RANDOM%%RANDOM%.cmd"
-set "NETWORK_PROBE_TIMEOUT_SEC=%KIMODO_NETWORK_PROBE_TIMEOUT_SEC%"
-if not defined NETWORK_PROBE_TIMEOUT_SEC set "NETWORK_PROBE_TIMEOUT_SEC=1"
-set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=%KIMODO_NETWORK_FALLBACK_HEAD_TIMEOUT_SEC%"
-if not defined NETWORK_FALLBACK_HEAD_TIMEOUT_SEC set "NETWORK_FALLBACK_HEAD_TIMEOUT_SEC=3"
 set "PYTHON_SPEC="
 set "INJECT_ONCE=0"
 set "SETUP_DEVICE=%KIMODO_TEST_SETUP_DEVICE%"
 if not defined SETUP_DEVICE set "SETUP_DEVICE="
 set "BITSANDBYTES_REQUIRED=0.49.2"
+set "UV_DEFAULT_INDEX="
 
 if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
 
@@ -87,6 +78,7 @@ if not exist "%UV_CACHE_DIR%" mkdir "%UV_CACHE_DIR%" >nul 2>nul
 set "UV_CACHE_DIR=%UV_CACHE_DIR%"
 if not exist "%UV_PYTHON_INSTALL_DIR%" mkdir "%UV_PYTHON_INSTALL_DIR%" >nul 2>nul
 set "UV_PYTHON_INSTALL_DIR=%UV_PYTHON_INSTALL_DIR%"
+set "PATH=%ROOT_DIR%\program\exe\uv;%PATH%"
 call :ensure_local_git_lfs
 if errorlevel 1 (
   echo [ERROR] local git/git-lfs check failed.
@@ -98,48 +90,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [STEP] Checking network reachability for package index...
-echo [INFO] Network probe started... timeout=%NETWORK_PROBE_TIMEOUT_SEC%s
-if exist "%NETWORK_PROBE_PS1%" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%NETWORK_PROBE_PS1%" -TimeoutSec %NETWORK_PROBE_TIMEOUT_SEC% -EmitCmdFile "%NETWORK_ENV_CMD%" -Quiet
-  if not errorlevel 1 (
-    if exist "%NETWORK_ENV_CMD%" (
-      call "%NETWORK_ENV_CMD%"
-      call :archive_file "%NETWORK_ENV_CMD%"
-    )
-    if defined KIMODO_PIP_INDEX_URL set "UV_DEFAULT_INDEX=!KIMODO_PIP_INDEX_URL!"
-  )
-)
-if defined KIMODO_PIP_BEST_NAME (
-  if defined KIMODO_PIP_BEST_MS (
-    echo [INFO] Network probe result: pip best=!KIMODO_PIP_BEST_NAME! ^(!KIMODO_PIP_BEST_MS! ms^)
-  ) else (
-    echo [INFO] Network probe result: pip best=!KIMODO_PIP_BEST_NAME!
-  )
-)
-if defined KIMODO_PY_ZIP_BEST_NAME (
-  if defined KIMODO_PY_ZIP_BEST_MS (
-    echo [INFO] Network probe result: python zip best=!KIMODO_PY_ZIP_BEST_NAME! ^(!KIMODO_PY_ZIP_BEST_MS! ms^)
-  ) else (
-    echo [INFO] Network probe result: python zip best=!KIMODO_PY_ZIP_BEST_NAME!
-  )
-)
-if defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=!UV_DEFAULT_INDEX:"=!"
-if not defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=%UV_INDEX_CANDIDATE_GLOBAL%"
-
-if /I "%UV_DEFAULT_INDEX%"=="https://pypi.org/simple" (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='Stop'; $u='%UV_INDEX_CANDIDATE_CN%'; $t=[int]'%NETWORK_FALLBACK_HEAD_TIMEOUT_SEC%';" ^
-    "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec $t -Uri $u | Out-Null; exit 0 } catch { exit 1 }"
-  if not errorlevel 1 set "UV_DEFAULT_INDEX=%UV_INDEX_CANDIDATE_CN%"
-)
-
-call :should_inject_once "setup_net_bad" "KIMODO_TEST_INJECT_SETUP_NET_BAD_ONCE"
-if "!INJECT_ONCE!"=="1" (
-  set "UV_DEFAULT_INDEX=http://127.0.0.1:9/simple"
-  echo [TEST] Injected setup network failure once: UV_DEFAULT_INDEX=%UV_DEFAULT_INDEX%
-)
-
+call :select_uv_default_index
+if errorlevel 1 exit /b 1
 echo [INFO] Selected uv default index: %UV_DEFAULT_INDEX%
 
 call :select_python_spec
@@ -165,8 +117,6 @@ if not exist "%VENV_PY%" (
   exit /b 1
 )
 
-if not exist "%TORCH_CACHE_DIR%" mkdir "%TORCH_CACHE_DIR%" >nul 2>nul
-
 call :should_inject_once "setup_abort" "KIMODO_TEST_INJECT_SETUP_ABORT_ONCE"
 if "!INJECT_ONCE!"=="1" (
   echo [TEST] Injected setup interrupt once after venv creation.
@@ -174,9 +124,9 @@ if "!INJECT_ONCE!"=="1" (
 )
 
 echo [STEP] Seeding build helpers in venv...
-"%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" pip setuptools wheel torchruntime
+"%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" pip setuptools wheel
 if errorlevel 1 (
-  echo [ERROR] Failed to install build helpers pip/setuptools/wheel/torchruntime.
+  echo [ERROR] Failed to install build helpers pip/setuptools/wheel.
   exit /b 1
 )
 
@@ -185,22 +135,26 @@ if not exist "%ANTLR4_WHEEL%" (
   echo [ERROR] Missing required local wheel: %ANTLR4_WHEEL%
   exit /b 1
 )
-"%UV_BIN%" pip install --python "%VENV_PY%" --no-index --find-links "%LOCAL_WHEELS_DIR%" --only-binary antlr4-python3-runtime antlr4-python3-runtime==4.9.3
+"%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --no-index --find-links "%LOCAL_WHEELS_DIR%" --only-binary antlr4-python3-runtime antlr4-python3-runtime==4.9.3
 if errorlevel 1 (
   echo [ERROR] Failed to install local antlr4 runtime wheel.
   exit /b 1
 )
 
 echo [STEP] Installing kimodo package with uv pip (no git extras)...
-"%VENV_PY%" -c "import importlib.metadata as m; print(m.version('kimodo'))" >nul 2>nul
-if errorlevel 1 (
+set "KIMODO_RUNTIME_OK=0"
+"%VENV_PY%" -c "import importlib.metadata as m; import tqdm, huggingface_hub, safetensors; print(m.version('kimodo'))" >nul 2>nul
+if not errorlevel 1 (
+  set "KIMODO_RUNTIME_OK=1"
+)
+if "%KIMODO_RUNTIME_OK%"=="0" (
   pushd "%SOURCE_ROOT%" >nul
   set "SKIP_MOTION_CORRECTION_IN_SETUP=1"
   "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --find-links "%LOCAL_WHEELS_DIR%" --only-binary antlr4-python3-runtime --editable . --no-build-isolation
   set "KIMODO_INSTALL_RC=%ERRORLEVEL%"
   set "SKIP_MOTION_CORRECTION_IN_SETUP="
   popd >nul
-  "%VENV_PY%" -c "import importlib.metadata as m; print(m.version('kimodo'))" >nul 2>nul
+  "%VENV_PY%" -c "import importlib.metadata as m; import tqdm, huggingface_hub, safetensors; print(m.version('kimodo'))" >nul 2>nul
   if errorlevel 1 (
     echo [ERROR] Failed to install kimodo package via uv pip.
     exit /b 1
@@ -212,28 +166,16 @@ if errorlevel 1 (
   echo [INFO] kimodo already usable, skip reinstall.
 )
 
-echo [STEP] Verifying torchruntime helper...
-"%VENV_PY%" -c "import torchruntime" >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] torchruntime helper missing after seed install.
-  exit /b 1
-)
-echo [INFO] torchruntime already present, skip reinstall.
-set "TORCH_FORCE_ARG="
-set "TORCH_VALIDATE_MODE=cuda"
-if /I "%SETUP_DEVICE%"=="cpu" (
-  set "TORCH_FORCE_ARG=--force-platform cpu"
-  set "TORCH_VALIDATE_MODE=cpu"
-  echo [STEP] Installing CPU-only torch runtime via torchruntime...
-) else (
-  echo [STEP] Installing torch runtime via torchruntime - auto-detect...
-)
-"%VENV_PY%" "%ROOT_DIR%\tools\resolve_torch_runtime.py" --python "%VENV_PY%" --cache-dir "%TORCH_CACHE_DIR%" --plan-file "%TORCH_PLAN_FILE%" %TORCH_FORCE_ARG%
-if errorlevel 1 (
-  echo [ERROR] torch runtime resolution/download failed.
-  exit /b 1
-)
-if /I "%TORCH_VALIDATE_MODE%"=="cpu" (
+set "TORCH_FORCE_CPU=0"
+if /I "%SETUP_DEVICE%"=="cpu" set "TORCH_FORCE_CPU=1"
+if "%TORCH_FORCE_CPU%"=="1" (
+  set "UV_TORCH_BACKEND=cpu"
+  echo [STEP] Installing CPU torch runtime via uv...
+  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --torch-backend cpu --reinstall-package torch --reinstall-package torchvision --reinstall-package torchaudio torch torchvision torchaudio
+  if errorlevel 1 (
+    echo [ERROR] CPU torch runtime install failed.
+    exit /b 1
+  )
   call :validate_torch_env "cpu"
   if errorlevel 1 (
     echo [ERROR] CPU torch runtime validation failed.
@@ -241,6 +183,25 @@ if /I "%TORCH_VALIDATE_MODE%"=="cpu" (
   )
   echo [INFO] CPU mode: skip bitsandbytes/4-bit install by policy.
 ) else (
+  echo [STEP] Ensuring torchruntime helper...
+  "%VENV_PY%" -c "import torchruntime" >nul 2>nul
+  if errorlevel 1 (
+    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" torchruntime
+    if errorlevel 1 (
+      echo [ERROR] Failed to install torchruntime.
+      exit /b 1
+    )
+  ) else (
+    echo [INFO] torchruntime already present, skip reinstall.
+  )
+
+  call "%VENV_DIR%\Scripts\activate.bat" >nul 2>nul
+  echo [STEP] Installing torch runtime via torchruntime --uv...
+  "%VENV_PY%" -m torchruntime install --uv torch torchvision torchaudio
+  if errorlevel 1 (
+    echo [ERROR] Torch runtime install failed.
+    exit /b 1
+  )
   call :validate_torch_env "cuda"
   if errorlevel 1 (
     echo [ERROR] CUDA torch runtime validation failed.
@@ -308,6 +269,23 @@ set "TS=%TS: =0%"
 set "BASE=%~nx1"
 set "DEST=%RECYCLE_DIR%\%BASE%.%TS%.%RANDOM%"
 move "%ARCHIVE_TARGET%" "%DEST%" >nul 2>nul
+exit /b 0
+
+:select_uv_default_index
+if defined KIMODO_PIP_INDEX_URL (
+  set "UV_DEFAULT_INDEX=%KIMODO_PIP_INDEX_URL%"
+  set "UV_DEFAULT_INDEX=%UV_DEFAULT_INDEX:"=%"
+  exit /b 0
+)
+
+set "UV_DEFAULT_INDEX=https://pypi.org/simple"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$u='https://pypi.tuna.tsinghua.edu.cn/simple';" ^
+  "try { Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec 2 -Uri $u | Out-Null; exit 0 } catch { exit 1 }" >nul 2>nul
+if not errorlevel 1 (
+  set "UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
+)
 exit /b 0
 
 :should_inject_once
@@ -420,7 +398,7 @@ set "BNB_CONTEXT=%~1"
 echo [STEP] Ensuring bitsandbytes for %BNB_CONTEXT%...
 "%VENV_PY%" -c "import bitsandbytes as bnb; from packaging.version import Version as V; import sys; v=V(getattr(bnb,'__version__','0')); m=V('0.46.1'); sys.exit(0 if v.__ge__(m) else 1)" >nul 2>nul
 if errorlevel 1 (
-  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" "bitsandbytes==%BITSANDBYTES_REQUIRED%"
+  "%UV_BIN%" pip install --python "%VENV_PY%" "bitsandbytes==%BITSANDBYTES_REQUIRED%"
   if errorlevel 1 (
     echo [ERROR] Failed to install bitsandbytes for %BNB_CONTEXT%.
     exit /b 1

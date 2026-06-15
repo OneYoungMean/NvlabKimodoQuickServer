@@ -2,16 +2,17 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
-if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-set "ROOT_DIR=%SCRIPT_DIR%\.."
-set "LAUNCHER=%ROOT_DIR%\run_server.bat"
-set "CLIENT_PS1=%SCRIPT_DIR%\example_run_server_tpose_client.ps1"
-set "PORT_FILE=%ROOT_DIR%\serverport"
-set "PID_FILE=%ROOT_DIR%\log\example_run_server_tpose.pid"
-set "SERVER_LOG=%ROOT_DIR%\log\example_run_server_tpose_server.log"
-set "BRIDGE_SERVER_LOG=%ROOT_DIR%\log\bridge_server.log"
-set "BRIDGE_MESSAGE_LOG=%ROOT_DIR%\log\bridge_message.log"
-set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
+for %%I in ("%SCRIPT_DIR%.") do set "SCRIPT_DIR=%%~fI"
+if "!SCRIPT_DIR:~-1!"=="\" set "SCRIPT_DIR=!SCRIPT_DIR:~0,-1!"
+for %%I in ("!SCRIPT_DIR!\..") do set "ROOT_DIR=%%~fI"
+for %%I in ("!ROOT_DIR!\run_server.bat") do set "LAUNCHER=%%~fI"
+for %%I in ("!SCRIPT_DIR!\example_run_server_tpose_client.ps1") do set "CLIENT_PS1=%%~fI"
+set "PORT_FILE=!ROOT_DIR!\serverport"
+set "PID_FILE=!ROOT_DIR!\log\example_run_server_tpose.pid"
+set "SERVER_LOG=!ROOT_DIR!\log\example_run_server_tpose_server.log"
+set "BRIDGE_SERVER_LOG=!ROOT_DIR!\log\bridge_server.log"
+set "BRIDGE_MESSAGE_LOG=!ROOT_DIR!\log\bridge_message.log"
+set "RECYCLE_DIR=!ROOT_DIR!\archive\recycle"
 set "WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%"
 if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=600"
 set "WAIT_HINT_INTERVAL_SEC=10"
@@ -24,40 +25,40 @@ set "MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
 set "VENV_PATH=%KIMODO_TEST_VENV_PATH%"
 set "USE_VENV_ARG=0"
 if defined VENV_PATH (
-  if exist "%VENV_PATH%\Scripts\python.exe" (
+  if exist "!VENV_PATH!\Scripts\python.exe" (
     set "USE_VENV_ARG=1"
   ) else (
-    echo [ERROR] KIMODO_TEST_VENV_PATH set but invalid: %VENV_PATH%\Scripts\python.exe
+    echo [ERROR] KIMODO_TEST_VENV_PATH set but invalid: !VENV_PATH!\Scripts\python.exe
     exit /b 1
   )
 )
 
-if not exist "%LAUNCHER%" (
-  echo [ERROR] run_server.bat not found: %LAUNCHER%
+if not exist "!LAUNCHER!" (
+  echo [ERROR] run_server.bat not found: !LAUNCHER!
   exit /b 1
 )
-if not exist "%CLIENT_PS1%" (
-  echo [ERROR] client ps1 not found: %CLIENT_PS1%
+if not exist "!CLIENT_PS1!" (
+  echo [ERROR] client ps1 not found: !CLIENT_PS1!
   exit /b 1
 )
-if not exist "%ROOT_DIR%\log" mkdir "%ROOT_DIR%\log" >nul 2>nul
-if not exist "%RECYCLE_DIR%" mkdir "%RECYCLE_DIR%" >nul 2>nul
+if not exist "!ROOT_DIR!\log" mkdir "!ROOT_DIR!\log" >nul 2>nul
+if not exist "!RECYCLE_DIR!" mkdir "!RECYCLE_DIR!" >nul 2>nul
 
 set "KIMODO_TEST_SETUP_DEVICE="
 if defined KIMODO_TEST_DEVICE (
   if /I "%KIMODO_TEST_DEVICE%"=="cpu" set "KIMODO_TEST_SETUP_DEVICE=cpu"
 )
 
-echo [TEST] ROOT_DIR=%ROOT_DIR%
-echo [TEST] MODEL=%MODEL%
-echo [TEST] DEVICE=%DEVICE%
+echo [TEST] ROOT_DIR=!ROOT_DIR!
+echo [TEST] MODEL=!MODEL!
+echo [TEST] DEVICE=!DEVICE!
 if defined MODELS_ROOT (
-  echo [TEST] MODELS_ROOT=%MODELS_ROOT%
+  echo [TEST] MODELS_ROOT=!MODELS_ROOT!
 ) else (
   echo [TEST] MODELS_ROOT=^<default^>
 )
 if "%USE_VENV_ARG%"=="1" (
-  echo [TEST] VENV_PATH=%VENV_PATH%
+  echo [TEST] VENV_PATH=!VENV_PATH!
 ) else (
   echo [TEST] VENV_PATH=^<auto^>
 )
@@ -66,10 +67,10 @@ echo [TEST] OUTPUT=file
 call :archive_file "%PORT_FILE%"
 call :archive_file "%PID_FILE%"
 call :archive_file "%SERVER_LOG%"
-if exist "%BRIDGE_SERVER_LOG%" call :archive_file "%BRIDGE_SERVER_LOG%"
-if exist "%BRIDGE_MESSAGE_LOG%" call :archive_file "%BRIDGE_MESSAGE_LOG%"
+if exist "!BRIDGE_SERVER_LOG!" call :archive_file "!BRIDGE_SERVER_LOG!"
+if exist "!BRIDGE_MESSAGE_LOG!" call :archive_file "!BRIDGE_MESSAGE_LOG!"
 
-set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; $args=@('/d','/c','run_server.bat','--model','%MODEL%','--device','%DEVICE%');"
+set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%','--device','%DEVICE%');"
 if defined MODELS_ROOT call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--models-root','%MODELS_ROOT%');"
 if "%USE_VENV_ARG%"=="1" call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--venv','%VENV_PATH%');"
 call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--output','file','--log','%SERVER_LOG%');"
@@ -83,7 +84,7 @@ if errorlevel 1 (
 
 set /a WAIT_SEC=0
 :wait_serverport
-if exist "%PORT_FILE%" (
+if exist "!PORT_FILE!" (
   call :read_serverport_retry
   if not errorlevel 1 goto got_serverport
 )
@@ -105,9 +106,9 @@ if !WAIT_MOD! equ 0 (
 )
 if !WAIT_SEC! geq %WAIT_TIMEOUT_SEC% (
   if defined RUNSERVER_EXITED (
-    echo [ERROR] serverport missing after !WAIT_SEC!s: %PORT_FILE% ^(run_server exited during startup^)
+    echo [ERROR] serverport missing after !WAIT_SEC!s: !PORT_FILE! ^(run_server exited during startup^)
   ) else (
-    echo [ERROR] serverport missing after !WAIT_SEC!s: %PORT_FILE%
+    echo [ERROR] serverport missing after !WAIT_SEC!s: !PORT_FILE!
   )
   call :dump_startup_logs
   call :kill_pid
@@ -148,7 +149,7 @@ echo [OK] example_run_server_tpose passed.
 exit /b 0
 
 :quit_and_wait
-if exist "%PORT_FILE%" (
+if exist "!PORT_FILE!" (
   call :read_serverport_retry
   set "QHOST=!HOST!"
   set "QPORT=!PORT!"
@@ -161,13 +162,13 @@ call :wait_pid_or_kill
 exit /b 0
 
 :wait_pid_or_kill
-if not exist "%PID_FILE%" exit /b 0
+if not exist "!PID_FILE!" exit /b 0
 set "SPID="
-for /f "usebackq delims=" %%A in ("%PID_FILE%") do (
+for /f "usebackq delims=" %%A in ("!PID_FILE!") do (
   if not defined SPID set "SPID=%%A"
 )
 if not defined SPID (
-  call :archive_file "%PID_FILE%"
+  call :archive_file "!PID_FILE!"
   exit /b 0
 )
 set /a WAIT_SEC=0
@@ -187,16 +188,16 @@ if !WAIT_SEC! geq 15 (
 goto wait_loop
 
 :kill_pid
-if not exist "%PID_FILE%" exit /b 0
+if not exist "!PID_FILE!" exit /b 0
 set "KPID="
-for /f "usebackq delims=" %%A in ("%PID_FILE%") do (
+for /f "usebackq delims=" %%A in ("!PID_FILE!") do (
   if not defined KPID set "KPID=%%A"
 )
 if defined KPID (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference='SilentlyContinue'; $pidValue='%KPID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
 )
-call :archive_file "%PID_FILE%"
+call :archive_file "!PID_FILE!"
 exit /b 0
 
 :archive_file
@@ -224,10 +225,10 @@ exit /b 0
 set "HOST="
 set "PORT="
 for /l %%R in (1,1,40) do (
-  if not exist "%PORT_FILE%" exit /b 1
+  if not exist "!PORT_FILE!" exit /b 1
   set "HOST="
   set "PORT="
-  for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
+  for /f "usebackq tokens=1,2 delims=:" %%A in ("!PORT_FILE!") do (
     set "HOST=%%A"
     set "PORT=%%B"
   )
@@ -250,9 +251,9 @@ if defined HOST if defined PORT (
 exit /b 1
 
 :is_runserver_alive
-if not exist "%PID_FILE%" exit /b 1
+if not exist "!PID_FILE!" exit /b 1
 set "RPID="
-for /f "usebackq delims=" %%A in ("%PID_FILE%") do (
+for /f "usebackq delims=" %%A in ("!PID_FILE!") do (
   if not defined RPID set "RPID=%%A"
 )
 if not defined RPID exit /b 1

@@ -214,80 +214,80 @@ if "!INJECT_ONCE!"=="1" (
 
 if "%FORCE_SYNC%"=="0" (
   if /I "%REQ_FILE%"==".gguf" (
-    if exist "%DEST_DIR%" (
-      call :ensure_gguf_presence "%DEST_DIR%"
+    if exist "!DEST_DIR!" (
+      call :ensure_gguf_presence "!DEST_DIR!"
       if not errorlevel 1 (
-        echo [INFO] Skip existing gguf model: %DEST_DIR%
-        call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
+        echo [INFO] Skip existing gguf model: !DEST_DIR!
+        call :inject_missing_after_download "!DEST_DIR!" "%REQ_FILE%"
         exit /b 0
       )
-      echo [WARN] Existing GGUF directory has no .gguf files, forcing sync: %DEST_DIR%
+      echo [WARN] Existing GGUF directory has no .gguf files, forcing sync: !DEST_DIR!
     )
   ) else (
-    if exist "%DEST_DIR%\%REQ_FILE%" (
-      echo [INFO] Skip existing model: %DEST_DIR%
-      call :validate_repo_safetensors "%DEST_DIR%" "%REQ_FILE%" "%LFS_INCLUDE%"
+    if exist "!DEST_DIR!\%REQ_FILE%" (
+      echo [INFO] Skip existing model: !DEST_DIR!
+      call :validate_repo_safetensors "!DEST_DIR!" "%REQ_FILE%" "%LFS_INCLUDE%"
       if errorlevel 1 exit /b 1
-      call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
+      call :inject_missing_after_download "!DEST_DIR!" "%REQ_FILE%"
       exit /b 0
     )
   )
 )
 
-if exist "%DEST_DIR%" (
-  if not exist "%DEST_DIR%\.git" (
-    call :backup_dir "%DEST_DIR%" || exit /b 1
+if exist "!DEST_DIR!" (
+  if not exist "!DEST_DIR!\.git" (
+    call :backup_dir "!DEST_DIR!" || exit /b 1
   )
 )
 
 :ensure_repo_sync
-if not exist "%DEST_DIR%" (
+if not exist "!DEST_DIR!" (
   echo [STEP] Cloning %REPO_URL%
   set "GIT_LFS_SKIP_SMUDGE=1"
-  git clone "%REPO_URL%" "%DEST_DIR%"
+  git clone --depth 1 "%REPO_URL%" "!DEST_DIR!"
   set "GIT_LFS_SKIP_SMUDGE="
   if errorlevel 1 exit /b 1
 ) else (
-  call :prepare_repo "%DEST_DIR%" || exit /b 1
-  echo [STEP] Updating existing repo: %DEST_DIR%
+  call :prepare_repo "!DEST_DIR!" || exit /b 1
+  echo [STEP] Updating existing repo: !DEST_DIR!
   set "GIT_LFS_SKIP_SMUDGE=1"
-  git -C "%DEST_DIR%" pull
+  git -C "!DEST_DIR!" pull
   set "GIT_LFS_SKIP_SMUDGE="
   if errorlevel 1 (
-    call :backup_dir "%DEST_DIR%" || exit /b 1
+    call :backup_dir "!DEST_DIR!" || exit /b 1
     echo [STEP] Re-cloning %REPO_URL%
     set "GIT_LFS_SKIP_SMUDGE=1"
-    git clone "%REPO_URL%" "%DEST_DIR%"
+    git clone --depth 1 "%REPO_URL%" "!DEST_DIR!"
     set "GIT_LFS_SKIP_SMUDGE="
     if errorlevel 1 exit /b 1
   )
 )
 
-call :prepare_repo "%DEST_DIR%" || exit /b 1
-git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
+call :prepare_repo "!DEST_DIR!" || exit /b 1
+git -C "!DEST_DIR!" lfs pull --include="%LFS_INCLUDE%"
 if errorlevel 1 exit /b 1
 
 if /I "%REQ_FILE%"==".gguf" (
-  call :ensure_gguf_presence "%DEST_DIR%"
+  call :ensure_gguf_presence "!DEST_DIR!"
   if errorlevel 1 (
-    echo [ERROR] Missing .gguf files after sync: %DEST_DIR%
+    echo [ERROR] Missing .gguf files after sync: !DEST_DIR!
     exit /b 1
   )
 ) else (
-  if not exist "%DEST_DIR%\%REQ_FILE%" (
-    git -C "%DEST_DIR%" checkout HEAD -- "%REQ_FILE%"
+  if not exist "!DEST_DIR!\%REQ_FILE%" (
+    git -C "!DEST_DIR!" checkout HEAD -- "%REQ_FILE%"
     if errorlevel 1 exit /b 1
-    git -C "%DEST_DIR%" lfs pull --include="%LFS_INCLUDE%"
+    git -C "!DEST_DIR!" lfs pull --include="%LFS_INCLUDE%"
     if errorlevel 1 exit /b 1
   )
-  if not exist "%DEST_DIR%\%REQ_FILE%" (
-    echo [ERROR] Missing %REQ_FILE% after sync: %DEST_DIR%
+  if not exist "!DEST_DIR!\%REQ_FILE%" (
+    echo [ERROR] Missing %REQ_FILE% after sync: !DEST_DIR!
     exit /b 1
   )
 )
-call :validate_repo_safetensors "%DEST_DIR%" "%REQ_FILE%" "%LFS_INCLUDE%"
+call :validate_repo_safetensors "!DEST_DIR!" "%REQ_FILE%" "%LFS_INCLUDE%"
 if errorlevel 1 exit /b 1
-call :inject_missing_after_download "%DEST_DIR%" "%REQ_FILE%"
+call :inject_missing_after_download "!DEST_DIR!" "%REQ_FILE%"
 exit /b 0
 
 :ensure_gguf_presence
@@ -329,13 +329,13 @@ exit /b 0
 :prepare_repo
 set "REPO_DIR=%~1"
 if "%UNLOCK_STALE%"=="1" call :rotate_lock "%REPO_DIR%"
-git -C "%REPO_DIR%" rev-parse --verify HEAD >nul 2>nul
+git -C "!REPO_DIR!" rev-parse --verify HEAD >nul 2>nul
 if not errorlevel 1 exit /b 0
-if exist "%REPO_DIR%\model.safetensors" (
-  echo [WARN] Existing non-git model directory found, keep local files: %REPO_DIR%
+if exist "!REPO_DIR!\model.safetensors" (
+  echo [WARN] Existing non-git model directory found, keep local files: !REPO_DIR!
   exit /b 0
 )
-call :backup_dir "%REPO_DIR%" || exit /b 1
+call :backup_dir "!REPO_DIR!" || exit /b 1
 exit /b 0
 
 :validate_repo_safetensors
