@@ -135,7 +135,10 @@ if not exist "%DEST_TEST_BAT%" (
 echo [STEP] Running test: %DEST_TEST_BAT%
 set "KIMODO_TEST_MODELS_ROOT=%TEST_MODELS_ROOT%"
 set "KIMODO_TEST_SERVER_WINDOW_STYLE=Normal"
-if not defined KIMODO_TEST_WAIT_TIMEOUT_SEC set "KIMODO_TEST_WAIT_TIMEOUT_SEC=300"
+rem Default 1200s: the first run downloads the ~2.6GiB cu128 torch wheel from the
+rem PyTorch official index (no mirror, by design), which can exceed the old 300s on
+rem slower networks. Override via KIMODO_TEST_WAIT_TIMEOUT_SEC for faster/cached runs.
+if not defined KIMODO_TEST_WAIT_TIMEOUT_SEC set "KIMODO_TEST_WAIT_TIMEOUT_SEC=1200"
 echo [INFO] KIMODO_TEST_SERVER_WINDOW_STYLE=%KIMODO_TEST_SERVER_WINDOW_STYLE%
 echo [INFO] KIMODO_TEST_WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%
 call "%DEST_TEST_BAT%"

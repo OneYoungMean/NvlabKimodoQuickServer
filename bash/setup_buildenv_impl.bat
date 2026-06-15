@@ -491,7 +491,7 @@ rem Launch a tiny real kernel to catch that here instead of at inference time.
 rem rc=3 signals "loadable but cannot run kernels" so the caller can fall back.
 "%VENV_PY%" -c "import torch,sys; t=torch.zeros(8,device='cuda'); (t+1).sum().item(); torch.cuda.synchronize(); print('kernel_ok'); sys.exit(0)" 2>nul
 if errorlevel 1 (
-  echo [WARN] GPU kernel launch test failed despite cuda.is_available()==True.
+  echo [WARN] GPU kernel launch test failed despite cuda being reported available.
   exit /b 3
 )
 echo [OK] CUDA torch runtime validated (kernel launch succeeded).
