@@ -53,7 +53,6 @@ exit /b %SETUP_EXIT%
 
 :run_setup
 set "UV_BIN=%ROOT_DIR%\program\exe\uv\uv.exe"
-set "UV_CONFIG_FILE=%ROOT_DIR%\uv.toml"
 set "UV_CACHE_DIR=%ROOT_DIR%\archive\uv_cache"
 set "UV_PYTHON_INSTALL_DIR=%ROOT_DIR%\archive\uv_python"
 set "LOCAL_WHEELS_DIR=%ROOT_DIR%\wheels"
