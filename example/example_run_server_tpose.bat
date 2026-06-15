@@ -16,6 +16,12 @@ set "RECYCLE_DIR=!ROOT_DIR!\archive\recycle"
 set "WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%"
 if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=600"
 set "WAIT_HINT_INTERVAL_SEC=10"
+rem Grace window after run_server exits before declaring failure. run_server exits
+rem normally once it hands off to the bridge, so we wait a few seconds for the
+rem bridge endpoint to appear; if it does not, the startup failed and we bail out
+rem immediately instead of waiting out WAIT_TIMEOUT_SEC. Override via env if needed.
+set "RUNSERVER_EXIT_GRACE_SEC=%KIMODO_TEST_RUNSERVER_EXIT_GRACE_SEC%"
+if not defined RUNSERVER_EXIT_GRACE_SEC set "RUNSERVER_EXIT_GRACE_SEC=15"
 
 set "MODEL=Kimodo-SOMA-RP-v1"
 if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
@@ -78,7 +84,23 @@ call :read_endpoint_from_logs
 if not errorlevel 1 goto got_serverport
 call :is_runserver_alive
 if errorlevel 1 (
-  set "RUNSERVER_EXITED=1"
+  rem run_server has exited. This is normal once it hands the service off to the
+  rem bridge process, so we do NOT fail immediately: the bridge may still be
+  rem writing serverport/endpoint. But if run_server died WITHOUT a successful
+  rem handoff (e.g. setup/preflight failed), the endpoint will never appear, so
+  rem we only grant a short grace window after exit before declaring failure --
+  rem far faster than waiting out the full WAIT_TIMEOUT_SEC.
+  if not defined RUNSERVER_EXITED (
+    set "RUNSERVER_EXITED=1"
+    set /a RUNSERVER_EXIT_AT=WAIT_SEC
+  )
+  set /a GRACE_ELAPSED=WAIT_SEC-RUNSERVER_EXIT_AT
+  if !GRACE_ELAPSED! geq %RUNSERVER_EXIT_GRACE_SEC% (
+    echo [ERROR] run_server exited and no serverport appeared within %RUNSERVER_EXIT_GRACE_SEC%s grace; setup/startup likely failed.
+    call :dump_startup_logs
+    call :kill_pid
+    exit /b 1
+  )
 )
 ping 127.0.0.1 -n 2 >nul
 set /a WAIT_SEC+=1

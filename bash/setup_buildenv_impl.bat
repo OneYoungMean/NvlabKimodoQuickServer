@@ -53,8 +53,13 @@ exit /b %SETUP_EXIT%
 
 :run_setup
 set "UV_BIN=%ROOT_DIR%\program\exe\uv\uv.exe"
-set "UV_CACHE_DIR=%ROOT_DIR%\archive\uv_cache"
-set "UV_PYTHON_INSTALL_DIR=%ROOT_DIR%\archive\uv_python"
+rem Do NOT override UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR: uv's default global cache
+rem (under %LOCALAPPDATA%\uv) is shared across all copy_to_test DEST runs, so the
+rem ~2.6GiB cu128 torch wheel and Python download only once and are reused. The
+rem previous %ROOT_DIR%-based override made every DEST re-download and keep its own
+rem ~5GB copy. Override KIMODO_UV_CACHE_DIR only if you must relocate the cache.
+if defined KIMODO_UV_CACHE_DIR set "UV_CACHE_DIR=%KIMODO_UV_CACHE_DIR%"
+if defined KIMODO_UV_PYTHON_DIR set "UV_PYTHON_INSTALL_DIR=%KIMODO_UV_PYTHON_DIR%"
 set "LOCAL_WHEELS_DIR=%ROOT_DIR%\wheels"
 set "ANTLR4_WHEEL=%LOCAL_WHEELS_DIR%\antlr4_python3_runtime-4.9.3-py3-none-any.whl"
 set "PYTHON_SPEC="
@@ -77,10 +82,8 @@ if errorlevel 1 (
   echo [ERROR] Docs: https://docs.astral.sh/uv/getting-started/installation/
   exit /b 1
 )
-if not exist "%UV_CACHE_DIR%" mkdir "%UV_CACHE_DIR%" >nul 2>nul
-set "UV_CACHE_DIR=%UV_CACHE_DIR%"
-if not exist "%UV_PYTHON_INSTALL_DIR%" mkdir "%UV_PYTHON_INSTALL_DIR%" >nul 2>nul
-set "UV_PYTHON_INSTALL_DIR=%UV_PYTHON_INSTALL_DIR%"
+if defined UV_CACHE_DIR if not exist "%UV_CACHE_DIR%" mkdir "%UV_CACHE_DIR%" >nul 2>nul
+if defined UV_PYTHON_INSTALL_DIR if not exist "%UV_PYTHON_INSTALL_DIR%" mkdir "%UV_PYTHON_INSTALL_DIR%" >nul 2>nul
 set "PATH=%ROOT_DIR%\program\exe\uv;%PATH%"
 call :ensure_local_git_lfs
 if errorlevel 1 (
@@ -405,6 +408,8 @@ echo [ENV] UV_DEFAULT_INDEX=%UV_DEFAULT_INDEX%
 echo [ENV] UV_INDEX_URL=%UV_INDEX_URL%
 echo [ENV] PIP_INDEX_URL=%PIP_INDEX_URL%
 echo [ENV] KIMODO_SETUP_DEVICE=%KIMODO_SETUP_DEVICE%  KIMODO_TEST_SETUP_DEVICE=%KIMODO_TEST_SETUP_DEVICE%
+echo [ENV] uv cache dir (effective):
+"%UV_BIN%" cache dir 2>nul && echo. >nul || echo [ENV]   ^(uv cache dir query failed^)
 echo [ENV] --- GPU (Win32_VideoController) ---
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_VideoController | ForEach-Object { '[ENV]   ' + $_.Name }" 2>nul
 echo [ENV] --- NVIDIA driver (nvidia-smi) ---
