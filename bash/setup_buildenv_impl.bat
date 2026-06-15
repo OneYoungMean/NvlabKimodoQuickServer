@@ -66,6 +66,8 @@ if /I "%SETUP_DEVICE%"=="cuda" set "SETUP_DEVICE=auto"
 set "BITSANDBYTES_REQUIRED=0.49.2"
 set "UV_DEFAULT_INDEX="
 
+call :print_environment
+
 if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
 
 call :ensure_uv
@@ -190,12 +192,12 @@ if "%TORCH_FORCE_CPU%"=="1" (
   if not errorlevel 1 (
     "%UV_BIN%" pip uninstall --python "%VENV_PY%" torch torchvision torchaudio >nul 2>nul
   )
-  rem Install the CUDA build directly from the cu128 index. We deliberately do NOT
-  rem use torchruntime here: it misdetects the platform as cu124 for pinned 2.11.x
-  rem (cu124 has no 2.11 win/cp312 wheel), and the PyPI mirror in UV_DEFAULT_INDEX
-  rem leaks in as an extra index, both of which silently resolve to 2.11.0+cpu.
-  rem The install runs in :install_cuda_torch with the index env vars cleared so
-  rem cu128 is the SOLE index; setlocal there keeps that scoped to the torch step.
+  rem Install the CUDA build directly from the cu128 index with pinned versions.
+  rem cu128 covers all target GPUs (Turing/RTX 20-series and newer) and ships
+  rem cp312 wheels for both Windows and Linux, so a single command works on every
+  rem platform. The install runs in :install_cuda_torch with the index env vars
+  rem cleared so cu128 is the SOLE index (the PyPI mirror in UV_DEFAULT_INDEX would
+  rem otherwise leak in as an extra index and silently resolve torch to a +cpu wheel).
   echo [STEP] Installing CUDA torch runtime from cu128 index...
   call :install_cuda_torch
   if errorlevel 1 (
@@ -208,7 +210,23 @@ if "%TORCH_FORCE_CPU%"=="1" (
     echo [WARN] triton-windows install failed; torch.compile/Triton kernels may be unavailable.
   )
   call :validate_torch_env "cuda"
-  if errorlevel 1 (
+  set "CUDA_VALIDATE_RC=!ERRORLEVEL!"
+  if !CUDA_VALIDATE_RC! EQU 3 (
+    rem rc=3 means torch reports CUDA available but a real kernel launch failed.
+    rem This is the old-architecture case (e.g. Maxwell/Pascal/Volta have no kernel
+    rem in cu128 builds). Fall back to torchruntime, which detects the actual GPU
+    rem architecture and installs the matching (older) CUDA build for it.
+    echo [WARN] cu128 torch loads but cannot launch GPU kernels on this device.
+    echo [WARN] Falling back to torchruntime to pick an architecture-matched build...
+    call :install_torch_via_torchruntime
+    if errorlevel 1 (
+      echo [ERROR] torchruntime fallback install failed.
+      exit /b 1
+    )
+    call :validate_torch_env "cuda"
+    set "CUDA_VALIDATE_RC=!ERRORLEVEL!"
+  )
+  if !CUDA_VALIDATE_RC! NEQ 0 (
     echo [ERROR] CUDA torch runtime validation failed.
     exit /b 1
   )
@@ -396,6 +414,40 @@ if errorlevel 1 (
 endlocal
 exit /b 0
 
+:install_torch_via_torchruntime
+rem Fallback path: cu128 produced a torch that loads but cannot launch kernels on
+rem this GPU (old architecture). torchruntime detects the actual GPU and installs
+rem the matching CUDA build. We do NOT pin versions here: pinning is what makes
+rem torchruntime misdetect the platform; unpinned lets it pick the right build.
+rem Index env vars are cleared so torchruntime's own --index-url is the sole index.
+echo [STEP] Ensuring torchruntime helper...
+"%VENV_PY%" -c "import torchruntime" >nul 2>nul
+if errorlevel 1 (
+  "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" torchruntime
+  if errorlevel 1 (
+    echo [ERROR] Failed to install torchruntime.
+    exit /b 1
+  )
+)
+"%VENV_PY%" -c "import torch" >nul 2>nul
+if not errorlevel 1 (
+  "%UV_BIN%" pip uninstall --python "%VENV_PY%" torch torchvision torchaudio >nul 2>nul
+)
+setlocal
+set "UV_DEFAULT_INDEX="
+set "UV_INDEX_URL="
+set "UV_EXTRA_INDEX_URL="
+set "PIP_INDEX_URL="
+set "PIP_EXTRA_INDEX_URL="
+echo [STEP] Installing architecture-matched torch via torchruntime --uv...
+"%VENV_PY%" -m torchruntime install --uv torch torchvision torchaudio
+if errorlevel 1 (
+  endlocal
+  exit /b 1
+)
+endlocal
+exit /b 0
+
 :validate_torch_env
 set "VALIDATE_MODE=%~1"
 if /I "%VALIDATE_MODE%"=="cpu" (
@@ -415,6 +467,17 @@ if errorlevel 1 (
   echo [ERROR] Please reinstall setup with auto mode.
   exit /b 1
 )
+rem is_available() alone is not enough: an architecture mismatch (e.g. a Maxwell/
+rem Pascal card with a cu128 build) reports available=True yet fails the moment a
+rem real kernel launches with "no kernel image is available for execution".
+rem Launch a tiny real kernel to catch that here instead of at inference time.
+rem rc=3 signals "loadable but cannot run kernels" so the caller can fall back.
+"%VENV_PY%" -c "import torch,sys; t=torch.zeros(8,device='cuda'); (t+1).sum().item(); torch.cuda.synchronize(); print('kernel_ok'); sys.exit(0)" 2>nul
+if errorlevel 1 (
+  echo [WARN] GPU kernel launch test failed despite cuda.is_available()==True.
+  exit /b 3
+)
+echo [OK] CUDA torch runtime validated (kernel launch succeeded).
 exit /b 0
 
 :ensure_bitsandbytes
