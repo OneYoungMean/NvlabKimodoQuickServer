@@ -395,6 +395,23 @@ if not exist "%LLAMA_SERVER_EXE%" (
 echo [ERROR] local llama-server exists but is not executable: %LLAMA_SERVER_EXE%
 exit /b 1
 
+:print_environment
+rem Diagnostics printed at setup start to make platform/GPU issues easy to debug.
+echo [ENV] ============ environment ============
+echo [ENV] OS: %OS%  PROCESSOR_ARCHITECTURE=%PROCESSOR_ARCHITECTURE%
+echo [ENV] SETUP_DEVICE=%SETUP_DEVICE%
+echo [ENV] ROOT_DIR=%ROOT_DIR%
+echo [ENV] UV_DEFAULT_INDEX=%UV_DEFAULT_INDEX%
+echo [ENV] UV_INDEX_URL=%UV_INDEX_URL%
+echo [ENV] PIP_INDEX_URL=%PIP_INDEX_URL%
+echo [ENV] KIMODO_SETUP_DEVICE=%KIMODO_SETUP_DEVICE%  KIMODO_TEST_SETUP_DEVICE=%KIMODO_TEST_SETUP_DEVICE%
+echo [ENV] --- GPU (Win32_VideoController) ---
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_VideoController | ForEach-Object { '[ENV]   ' + $_.Name }" 2>nul
+echo [ENV] --- NVIDIA driver (nvidia-smi) ---
+where nvidia-smi >nul 2>nul && (nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>nul) || echo [ENV]   nvidia-smi not found ^(no NVIDIA driver, or not on PATH^)
+echo [ENV] =====================================
+exit /b 0
+
 :install_cuda_torch
 rem Isolate index env vars so cu128 is the only index uv sees. uv treats
 rem UV_DEFAULT_INDEX (the PyPI mirror) as an additional index even when
