@@ -8,10 +8,6 @@ set "LOG_DIR=%ROOT_DIR%\log"
 set "ARCHIVE_DIR=%ROOT_DIR%\archive\recycle"
 set "PORT_FILE=%ROOT_DIR%\serverport"
 set "MODELS_ROOT=C:\nvlab\models~"
-set "VENV_PATH=%KIMODO_TEST_VENV_PATH%"
-if not defined VENV_PATH (
-  if exist "%ROOT_DIR%\kimodo\.venv\Scripts\python.exe" set "VENV_PATH=%ROOT_DIR%\kimodo\.venv"
-)
 
 if not exist "%ROOT_DIR%\run_server.bat" (
   echo [ERROR] run_server.bat not found under: %ROOT_DIR%
@@ -63,11 +59,7 @@ set "CASE_WRAPPER=%LOG_DIR%\test_watchdog_%CASE_NAME%_wrapper.bat"
   if defined CASE_MAX_FAILS echo set "KIMODO_WATCHDOG_STARTUP_MAX_FAILS=%CASE_MAX_FAILS%"
   if defined CASE_RUNTIME_INTERVAL echo set "KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC=%CASE_RUNTIME_INTERVAL%"
   if defined CASE_IDLE_NOLOG_MAX echo set "KIMODO_WATCHDOG_IDLE_NOLOG_MAX=%CASE_IDLE_NOLOG_MAX%"
-  if defined VENV_PATH (
-    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%CASE_RUN_LOG%" --venv "%VENV_PATH%"
-  ) else (
-    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%CASE_RUN_LOG%"
-  )
+  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%CASE_RUN_LOG%"
   echo endlocal
 )
 start "%LAUNCH_TITLE%_%CASE_NAME%" cmd /k call "%CASE_WRAPPER%"

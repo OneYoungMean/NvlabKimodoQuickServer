@@ -2,8 +2,8 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
-if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-set "ROOT_DIR=%SCRIPT_DIR%\.."
+for %%I in ("%SCRIPT_DIR%\..") do set "TEST_DIR=%%~fI"
+for %%I in ("%TEST_DIR%\..") do set "ROOT_DIR=%%~fI"
 set "LOG_DIR=%ROOT_DIR%\log"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle"
 set "PORT_FILE=%ROOT_DIR%\serverport"
@@ -46,7 +46,7 @@ echo [STEP] run_server cpu mode...
 > "%RUN_WRAPPER%" (
   echo @echo off
   echo cd /d "%ROOT_DIR%"
-  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --device cpu --models-root "%MODELS_ROOT%" --venv "%ROOT_DIR%\kimodo\.venv" --output file --log "%RUN_LOG%"
+  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --device cpu --models-root "%MODELS_ROOT%" --output file --log "%RUN_LOG%"
 )
 start "%RUN_WINDOW_TITLE%" cmd /k call "%RUN_WRAPPER%"
 
@@ -90,7 +90,7 @@ if errorlevel 1 (
 )
 
 call :wait_exit_or_kill "%RUN_PID_FILE%" 30
-echo [OK] test_cpu_setup_and_run passed.
+echo [OK] case_cpu_setup_and_run passed.
 exit /b 0
 
 :wait_exit_or_kill

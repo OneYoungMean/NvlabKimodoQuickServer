@@ -14,11 +14,6 @@ set "BRIDGE_FIXED_LOG=%LOG_DIR%\bridge_server.log"
 set "MODELS_ROOT=C:\nvlab\models~"
 if defined KIMODO_TEST_MODELS_ROOT set "MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
 
-set "VENV_PATH=%KIMODO_TEST_VENV_PATH%"
-if not defined VENV_PATH (
-  if exist "%ROOT_DIR%\kimodo\.venv\Scripts\python.exe" set "VENV_PATH=%ROOT_DIR%\kimodo\.venv"
-)
-
 if not exist "%ROOT_DIR%\run_server.bat" (
   echo [ERROR] run_server.bat not found: %ROOT_DIR%\run_server.bat
   exit /b 1
@@ -39,11 +34,7 @@ set "RUN_WINDOW_TITLE=KIMODO_TEST_MULTI_START"
 
 echo [TEST] ROOT_DIR=%ROOT_DIR%
 echo [TEST] MODELS_ROOT=%MODELS_ROOT%
-if defined VENV_PATH (
-  echo [TEST] VENV_PATH=%VENV_PATH%
-) else (
-  echo [TEST] VENV_PATH=^<default^>
-)
+echo [TEST] VENV_PATH=^<disabled^>
 
 call :start_server_background
 if errorlevel 1 exit /b 1
@@ -94,17 +85,10 @@ set "RUN_IDX=%~1"
 set "RUN_LOG=%LOG_DIR%\test_multi_start_run%RUN_IDX%.log"
 call :archive_file "%RUN_LOG%"
 
-if defined VENV_PATH (
-  pushd "%ROOT_DIR%" >nul
-  call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --venv "%VENV_PATH%" --output file --log "%RUN_LOG%"
-  set "RC=%ERRORLEVEL%"
-  popd >nul
-) else (
-  pushd "%ROOT_DIR%" >nul
-  call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%RUN_LOG%"
-  set "RC=%ERRORLEVEL%"
-  popd >nul
-)
+pushd "%ROOT_DIR%" >nul
+call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%RUN_LOG%"
+set "RC=%ERRORLEVEL%"
+popd >nul
 if not "%RC%"=="0" (
   echo [ERROR] repeated start #%RUN_IDX% returned %RC%.
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%RUN_LOG%' -Tail 60"
@@ -152,11 +136,7 @@ exit /b 0
 > "%RUN_WRAPPER%" (
   echo @echo off
   echo cd /d "%ROOT_DIR%"
-  if defined VENV_PATH (
-    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --venv "%VENV_PATH%" --output file --log "%BRIDGE_LOG%"
-  ) else (
-    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%BRIDGE_LOG%"
-  )
+  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%BRIDGE_LOG%"
 )
 start "%RUN_WINDOW_TITLE%" cmd /k call "%RUN_WRAPPER%"
 exit /b 0

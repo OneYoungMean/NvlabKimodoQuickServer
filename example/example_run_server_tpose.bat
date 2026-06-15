@@ -22,16 +22,7 @@ if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
 set "DEVICE=%KIMODO_TEST_DEVICE%"
 if not defined DEVICE set "DEVICE=cuda"
 set "MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
-set "VENV_PATH=%KIMODO_TEST_VENV_PATH%"
 set "USE_VENV_ARG=0"
-if defined VENV_PATH (
-  if exist "!VENV_PATH!\Scripts\python.exe" (
-    set "USE_VENV_ARG=1"
-  ) else (
-    echo [ERROR] KIMODO_TEST_VENV_PATH set but invalid: !VENV_PATH!\Scripts\python.exe
-    exit /b 1
-  )
-)
 
 if not exist "!LAUNCHER!" (
   echo [ERROR] run_server.bat not found: !LAUNCHER!
@@ -57,11 +48,7 @@ if defined MODELS_ROOT (
 ) else (
   echo [TEST] MODELS_ROOT=^<default^>
 )
-if "%USE_VENV_ARG%"=="1" (
-  echo [TEST] VENV_PATH=!VENV_PATH!
-) else (
-  echo [TEST] VENV_PATH=^<auto^>
-)
+echo [TEST] VENV_PATH=^<disabled^>
 echo [TEST] OUTPUT=file
 
 call :archive_file "%PORT_FILE%"
@@ -72,7 +59,6 @@ if exist "!BRIDGE_MESSAGE_LOG!" call :archive_file "!BRIDGE_MESSAGE_LOG!"
 
 set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%','--device','%DEVICE%');"
 if defined MODELS_ROOT call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--models-root','%MODELS_ROOT%');"
-if "%USE_VENV_ARG%"=="1" call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--venv','%VENV_PATH%');"
 call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--output','file','--log','%SERVER_LOG%');"
 set "LAUNCH_PS_CMD=!LAUNCH_PS_CMD! $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
 
