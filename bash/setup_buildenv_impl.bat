@@ -60,6 +60,26 @@ rem previous %ROOT_DIR%-based override made every DEST re-download and keep its 
 rem ~5GB copy. Override KIMODO_UV_CACHE_DIR only if you must relocate the cache.
 if defined KIMODO_UV_CACHE_DIR set "UV_CACHE_DIR=%KIMODO_UV_CACHE_DIR%"
 if defined KIMODO_UV_PYTHON_DIR set "UV_PYTHON_INSTALL_DIR=%KIMODO_UV_PYTHON_DIR%"
+rem Parallelize downloads so torch + its many deps fetch concurrently instead of
+rem serially. Override KIMODO_UV_CONCURRENT_DOWNLOADS to tune; default 16.
+set "UV_CONCURRENT_DOWNLOADS=%KIMODO_UV_CONCURRENT_DOWNLOADS%"
+if not defined UV_CONCURRENT_DOWNLOADS set "UV_CONCURRENT_DOWNLOADS=16"
+rem cu128 torch source. The Aliyun mirror hosts the cu128 wheels as a flat file
+rem listing (used via --find-links) and benchmarks ~2x faster from CN networks
+rem than the official index. If it is unreachable or lacks the pinned version we
+rem fall back to --torch-backend cu128 (the official download.pytorch.org index).
+rem Override KIMODO_TORCH_FINDLINKS to point at a different mirror, or set it empty
+rem to skip the mirror and always use the official index.
+set "TORCH_FINDLINKS=%KIMODO_TORCH_FINDLINKS%"
+if not defined KIMODO_TORCH_FINDLINKS set "TORCH_FINDLINKS=https://mirrors.aliyun.com/pytorch-wheels/cu128"
+rem Host to ping to decide whether the mirror is "close" (i.e. we are on a CN
+rem network). If average latency exceeds KIMODO_TORCH_MIRROR_MAX_PING_MS the mirror
+rem is skipped entirely and torch comes from the official index -- avoids paying the
+rem mirror's slower find-links resolve on networks where it would not be faster.
+set "TORCH_MIRROR_PING_HOST=%KIMODO_TORCH_MIRROR_PING_HOST%"
+if not defined TORCH_MIRROR_PING_HOST set "TORCH_MIRROR_PING_HOST=mirrors.aliyun.com"
+set "TORCH_MIRROR_MAX_PING_MS=%KIMODO_TORCH_MIRROR_MAX_PING_MS%"
+if not defined TORCH_MIRROR_MAX_PING_MS set "TORCH_MIRROR_MAX_PING_MS=50"
 set "LOCAL_WHEELS_DIR=%ROOT_DIR%\wheels"
 set "ANTLR4_WHEEL=%LOCAL_WHEELS_DIR%\antlr4_python3_runtime-4.9.3-py3-none-any.whl"
 set "PYTHON_SPEC="
@@ -156,6 +176,20 @@ if not errorlevel 1 (
 if "%KIMODO_RUNTIME_OK%"=="0" (
   pushd "%SOURCE_ROOT%" >nul
   set "SKIP_MOTION_CORRECTION_IN_SETUP=1"
+  rem Pre-install the cu128 torch build BEFORE kimodo so the heavy torch wheels come
+  rem from the fast source (Aliyun mirror, official fallback) exactly once. kimodo's
+  rem torch is an indirect dep (transformers/peft) with no version cap, so once a
+  rem satisfying cu128 torch is present uv leaves it untouched during the editable
+  rem install (verified: "no changes"). CPU mode skips this and installs the cpu
+  rem backend in the CPU branch below.
+  if /I not "%SETUP_DEVICE%"=="cpu" (
+    call :install_cuda_torch
+    if errorlevel 1 (
+      echo [ERROR] CUDA torch runtime install failed.
+      popd >nul
+      exit /b 1
+    )
+  )
   "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --find-links "%LOCAL_WHEELS_DIR%" --only-binary antlr4-python3-runtime --editable . --no-build-isolation
   set "KIMODO_INSTALL_RC=%ERRORLEVEL%"
   set "SKIP_MOTION_CORRECTION_IN_SETUP="
@@ -190,22 +224,20 @@ if "%TORCH_FORCE_CPU%"=="1" (
   echo [INFO] CPU mode: skip bitsandbytes/4-bit install by policy.
 ) else (
   call "%VENV_DIR%\Scripts\activate.bat" >nul 2>nul
-  echo [STEP] Removing any pre-existing torch so the CUDA build can be installed...
-  "%VENV_PY%" -c "import torch" >nul 2>nul
-  if not errorlevel 1 (
-    "%UV_BIN%" pip uninstall --python "%VENV_PY%" torch torchvision torchaudio >nul 2>nul
-  )
-  rem Install the CUDA build directly from the cu128 index with pinned versions.
-  rem cu128 covers all target GPUs (Turing/RTX 20-series and newer) and ships
-  rem cp312 wheels for both Windows and Linux, so a single command works on every
-  rem platform. The install runs in :install_cuda_torch with the index env vars
-  rem cleared so cu128 is the SOLE index (the PyPI mirror in UV_DEFAULT_INDEX would
-  rem otherwise leak in as an extra index and silently resolve torch to a +cpu wheel).
-  echo [STEP] Installing CUDA torch runtime from cu128 index...
-  call :install_cuda_torch
+  rem torch was already installed as the cu128 build before kimodo above. This is a
+  rem safety net: only (re)install when torch is missing or not a cu128 build -- e.g.
+  rem when kimodo was "already usable" and the pre-install was skipped, leaving a
+  rem stale +cpu torch from a previous run.
+  "%VENV_PY%" -c "import torch,sys; sys.exit(0 if torch.version.cuda is not None else 1)" >nul 2>nul
   if errorlevel 1 (
-    echo [ERROR] CUDA torch runtime install failed.
-    exit /b 1
+    echo [STEP] torch is not a cu128 build; installing CUDA torch...
+    call :install_cuda_torch
+    if errorlevel 1 (
+      echo [ERROR] CUDA torch runtime install failed.
+      exit /b 1
+    )
+  ) else (
+    echo [INFO] torch already a CUDA build, skip cu128 reinstall.
   )
   echo [STEP] Installing triton-windows...
   "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" triton-windows
@@ -418,23 +450,35 @@ echo [ENV] =====================================
 exit /b 0
 
 :install_cuda_torch
-rem Isolate index env vars so cu128 is the only index uv sees. uv treats
-rem UV_DEFAULT_INDEX (the PyPI mirror) as an additional index even when
-rem --index-url is given, which would let it resolve torch to a +cpu wheel.
-rem setlocal scopes the cleared vars to this call; endlocal on exit restores them.
-setlocal
-set "UV_DEFAULT_INDEX="
-set "UV_INDEX_URL="
-set "UV_EXTRA_INDEX_URL="
-set "PIP_INDEX_URL="
-set "PIP_EXTRA_INDEX_URL="
-"%UV_BIN%" pip install --python "%VENV_PY%" --index-url https://download.pytorch.org/whl/cu128 --reinstall-package torch --reinstall-package torchvision --reinstall-package torchaudio torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0
-if errorlevel 1 (
-  endlocal
-  exit /b 1
+rem Install the cu128 torch/vision/audio build. If the Aliyun mirror is configured
+rem AND pings close (we are on a CN network), use it via --find-links (flat wheel
+rem listing, ~2x faster from CN). Otherwise -- mirror unset, ping too high, ping
+rem failed, or the mirror install errors -- use --torch-backend cu128 (official
+rem download.pytorch.org index). Dependencies always come from the fast PyPI mirror
+rem in UV_DEFAULT_INDEX. --reinstall-package replaces any stale +cpu torch.
+if defined TORCH_FINDLINKS (
+  call :mirror_ping_ok
+  if not errorlevel 1 (
+    echo [STEP] Installing cu128 torch from mirror: %TORCH_FINDLINKS%
+    "%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --find-links "%TORCH_FINDLINKS%" --reinstall-package torch --reinstall-package torchvision --reinstall-package torchaudio torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0
+    if not errorlevel 1 exit /b 0
+    echo [WARN] cu128 torch install from mirror failed; falling back to official index.
+  ) else (
+    echo [INFO] mirror %TORCH_MIRROR_PING_HOST% ping too high/unreachable; using official index.
+  )
 )
-endlocal
+echo [STEP] Installing cu128 torch from official index (torch-backend cu128)...
+"%UV_BIN%" pip install --python "%VENV_PY%" --default-index "%UV_DEFAULT_INDEX%" --torch-backend cu128 --reinstall-package torch --reinstall-package torchvision --reinstall-package torchaudio torch torchvision torchaudio
+if errorlevel 1 exit /b 1
 exit /b 0
+
+:mirror_ping_ok
+rem Returns 0 if average ping to TORCH_MIRROR_PING_HOST is <= TORCH_MIRROR_MAX_PING_MS,
+rem else 1 (including ping failure). Uses Test-Connection so it is locale-independent.
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $a=(Test-Connection -ComputerName '%TORCH_MIRROR_PING_HOST%' -Count 3 -ErrorAction Stop | Measure-Object -Property ResponseTime -Average).Average; if ($a -le %TORCH_MIRROR_MAX_PING_MS%) { '1' } else { '0' } } catch { '0' }"`) do set "PING_OK=%%P"
+echo [INFO] mirror ping check: host=%TORCH_MIRROR_PING_HOST% threshold=%TORCH_MIRROR_MAX_PING_MS%ms ok=%PING_OK%
+if "%PING_OK%"=="1" exit /b 0
+exit /b 1
 
 :install_torch_via_torchruntime
 rem Fallback path: cu128 produced a torch that loads but cannot launch kernels on
