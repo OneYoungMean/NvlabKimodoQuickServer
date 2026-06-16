@@ -76,7 +76,7 @@ if [[ -f "${SENTINEL}" ]]; then
   common_archive_file "${SENTINEL}" "${RECYCLE_DIR}"
 fi
 
-{ echo "started=$(date '+%Y-%m-%d %H:%M:%S')"; echo "root=${ROOT_DIR}"; } > "${LOCK_FILE}"
+{ echo "started=$(date '+%Y-%m-%d %H:%M:%S')"; echo "root=\"${ROOT_DIR}\""; } > "${LOCK_FILE}"
 
 main() {
   echo "[STEP] Build env (single-thread)..."
@@ -106,8 +106,8 @@ main() {
     echo "setup_time=$(date '+%Y-%m-%d %H:%M:%S')"
     echo "setup_mode=${REQUESTED_SETUP_MODE}"
     echo "torch_runtime=${torch_runtime}"
-    echo "root_dir=${ROOT_DIR}"
-    echo "source_root=${SOURCE_ROOT}"
+    echo "root_dir=\"${ROOT_DIR}\""
+    echo "source_root=\"${SOURCE_ROOT}\""
   } > "${SENTINEL}"
 
   echo "[OK] setup complete."

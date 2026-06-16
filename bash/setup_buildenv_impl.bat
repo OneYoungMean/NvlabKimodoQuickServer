@@ -35,7 +35,7 @@ if not exist "%SOURCE_ROOT%\kimodo\model\load_model.py" (
 
 > "%LOCK_FILE%" (
   echo started=%DATE% %TIME%
-  echo root=%ROOT_DIR%
+  echo root="%ROOT_DIR%"
 )
 
 if defined KIMODO_SETUP_BG (

@@ -80,7 +80,7 @@ if exist "!SENTINEL!" (
 
 > "!LOCK_FILE!" (
   echo started=%DATE% %TIME%
-  echo root=!ROOT_DIR!
+  echo root="!ROOT_DIR!"
 )
 
 if /I "%OUTPUT_MODE%"=="file" (
@@ -135,8 +135,8 @@ if not defined TORCH_RUNTIME set "TORCH_RUNTIME=unknown"
   echo setup_time=%DATE% %TIME%
   echo setup_mode=!REQUESTED_SETUP_MODE!
   echo torch_runtime=!TORCH_RUNTIME!
-  echo root_dir=!ROOT_DIR!
-  echo source_root=!SOURCE_ROOT!
+  echo root_dir="!ROOT_DIR!"
+  echo source_root="!SOURCE_ROOT!"
 )
 
 echo [OK] setup complete.
