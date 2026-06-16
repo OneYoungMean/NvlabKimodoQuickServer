@@ -230,23 +230,26 @@ if exist "!PORT_FILE!" (
 call "!RUN_SETUP_PHASE_BAT!" "!ROOT_DIR!" "!OUTPUT_MODE!" "!USING_EXTERNAL_VENV!" "!SETUP_SENTINEL!" "!SETUP_BAT!" "!LOG_DIR!\!LOG_NAME_SETUP!" "!SETUP_DEVICE_MODE!"
 if errorlevel 1 exit /b 1
 
-if defined RUN_DEVICE (
-  if /I "!RUN_DEVICE!"=="cpu" (
-    if /I "!CPU_TEXT_ENCODER!"=="gguf" (
-      set "USE_CPU_GGUF=1"
-      set "DOWNLOAD_GGUF=1"
-    )
-  )
-)
-set "KIMODO_DOWNLOAD_GGUF=%DOWNLOAD_GGUF%"
-call "!RUN_DOWNLOAD_PHASE_BAT!" "!ROOT_DIR!" "!OUTPUT_MODE!" "!USING_EXTERNAL_MODELS!" "!HIGHVRAM!" "!MODEL_RUN_NAME!" "!MODEL_NAME!" "!DOWNLOAD_BAT!" "!LOG_DIR!\!LOG_NAME_DOWNLOAD!"
-if errorlevel 1 exit /b 1
-
 if not defined VENV_PY set "VENV_PY=%SOURCE_ROOT%\.venv\Scripts\python.exe"
 if not exist "!VENV_PY!" (
   echo [ERROR] Missing venv python: !VENV_PY!
   exit /b 1
 )
+
+REM Explicit CPU run implies the GGUF text encoder regardless of detected VRAM.
+REM The download phase decides GGUF-vs-local on its own (by VRAM total) when the
+REM user has not pinned KIMODO_DOWNLOAD_GGUF.
+if defined RUN_DEVICE (
+  if /I "!RUN_DEVICE!"=="cpu" (
+    if /I "!CPU_TEXT_ENCODER!"=="gguf" (
+      set "USE_CPU_GGUF=1"
+      if not defined KIMODO_DOWNLOAD_GGUF set "KIMODO_DOWNLOAD_GGUF=1"
+    )
+  )
+)
+call "!RUN_DOWNLOAD_PHASE_BAT!" "!ROOT_DIR!" "!OUTPUT_MODE!" "!USING_EXTERNAL_MODELS!" "!HIGHVRAM!" "!MODEL_RUN_NAME!" "!MODEL_NAME!" "!DOWNLOAD_BAT!" "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" "!VENV_PY!"
+if errorlevel 1 exit /b 1
+
 echo [STEP] Preflight runtime import check...
 "!VENV_PY!" -c "import torch, kimodo, motion_correction; print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda))"
 if errorlevel 1 (
@@ -259,61 +262,24 @@ if not exist "!MODELS_ROOT!\!MODEL_DIR_NAME!\model.safetensors" (
   echo [ERROR] Missing model file: !MODELS_ROOT!\!MODEL_DIR_NAME!\model.safetensors
   exit /b 1
 )
-if "!USE_CPU_GGUF!"=="1" (
-  if not exist "!GGUF_MODEL_PATH!" (
-    echo [ERROR] CPU gguf mode enabled but path missing: !GGUF_MODEL_PATH!
-    exit /b 1
-  )
-  set "GGUF_MODEL_FILE="
-  if /I "%GGUF_MODEL_PATH:~-5%"==".gguf" (
-    set "GGUF_MODEL_FILE=%GGUF_MODEL_PATH%"
-  ) else (
-    for /f "delims=" %%F in ('dir /b /s "!GGUF_MODEL_PATH!\*.gguf" 2^>nul') do (
-      if not defined GGUF_MODEL_FILE set "GGUF_MODEL_FILE=%%F"
-    )
-  )
-  if not defined GGUF_MODEL_FILE (
-    echo [ERROR] CPU gguf mode enabled but no .gguf found under: !GGUF_MODEL_PATH!
-    exit /b 1
-  )
-  set "KIMODO_GGUF_MODEL_PATH=!GGUF_MODEL_FILE!"
-) else if "!HIGHVRAM!"=="1" (
-  if not exist "!MODELS_ROOT!\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" if not exist "!MODELS_ROOT!\Meta-Llama-3-8B-Instruct\model.safetensors" (
-    echo [ERROR] Missing Meta-Llama model under !MODELS_ROOT!\Meta-Llama-3-8B-Instruct
-    exit /b 1
-  )
-  if not exist "!KIMODO_LLM2VEC_PEFT_DIR!\adapter_model.safetensors" if not exist "!KIMODO_LLM2VEC_PEFT_DIR!\model.safetensors" (
-    echo [ERROR] Missing LLM2Vec PEFT model under !KIMODO_LLM2VEC_PEFT_DIR!
-    exit /b 1
-  )
-) else (
-  if not exist "!KIMODO_LLM2VEC_DIR!\model.safetensors" (
-    echo [ERROR] Missing text encoder model: !KIMODO_LLM2VEC_DIR!\model.safetensors
-    exit /b 1
-  )
-)
+REM Text-encoder assets are intentionally NOT hard-required here. The bridge picks
+REM its own encoder link (local LLM2Vec vs llama.cpp GGUF) from detected VRAM and
+REM reports a precise error if the model it actually selected is missing.
 
 set "PYTHONPATH=%SOURCE_ROOT%"
 set "KIMODO_ROOT_PATH=%ROOT_DIR%"
 set "CHECKPOINT_DIR=%MODELS_ROOT%"
 set "LOCAL_CACHE=true"
-if "%USE_CPU_GGUF%"=="1" (
-  set "TEXT_ENCODER_MODE=api"
-  set "TEXT_ENCODER_API_BACKEND=llama"
-  set "KIMODO_CPU_TEXT_ENCODER=gguf"
-  if defined GGUF_CTX set "KIMODO_GGUF_CTX=%GGUF_CTX%"
-  set "TEXT_ENCODER_DEVICE=cpu"
-) else (
-  set "TEXT_ENCODER_MODE=local"
-  set "TEXT_ENCODER=llm2vec"
-  set "TEXT_ENCODER_DEVICE=%TEXT_ENCODER_DEVICE_MODE%"
-)
+REM Provide encoder resources/hints only. The bridge owns TEXT_ENCODER_MODE,
+REM TEXT_ENCODER_URL and the final TEXT_ENCODER_DEVICE based on its VRAM tier.
+set "TEXT_ENCODER=llm2vec"
+set "KIMODO_CPU_TEXT_ENCODER=%CPU_TEXT_ENCODER%"
+set "KIMODO_GGUF_MODEL_PATH=%GGUF_MODEL_PATH%"
+if defined GGUF_CTX set "KIMODO_GGUF_CTX=%GGUF_CTX%"
+if defined TEXT_ENCODER_DEVICE_MODE set "KIMODO_TEXT_ENCODER_DEVICE_HINT=%TEXT_ENCODER_DEVICE_MODE%"
+if "%USE_CPU_GGUF%"=="1" set "KIMODO_FORCE_GGUF=1"
 echo [INFO] Runtime device: !RUN_DEVICE!
-echo [INFO] Text encoder device: !TEXT_ENCODER_DEVICE!
-if "!USE_CPU_GGUF!"=="1" (
-  echo [INFO] CPU text encoder mode: gguf
-  echo [INFO] GGUF model path: !KIMODO_GGUF_MODEL_PATH!
-)
+echo [INFO] GGUF model path: !KIMODO_GGUF_MODEL_PATH!
 set "HF_HOME=!ROOT_DIR!\hf_cache"
 set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
 set "HF_HUB_CACHE=%HF_HOME%\hub"

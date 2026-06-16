@@ -115,16 +115,15 @@ if /I "%MODEL_REPO_NAME%"=="Kimodo-G1-SEED-v1" set "MODEL_REPO_URL_FALLBACK=http
 call :ensure_repo_with_fallback "%MODEL_REPO_URL%" "%MODEL_REPO_URL_FALLBACK%" "%MODELS_DIR%\%MODEL_DIR_NAME%" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 
-if "%HIGHVRAM%"=="1" (
+if /I "%DOWNLOAD_GGUF%"=="1" (
+  echo [STEP] GGUF mode enabled: downloading GGUF text encoder ^(skip local NF4/full encoder^)
+  call :ensure_repo_with_fallback "%GGUF_REPO_URL%" "%GGUF_REPO_URL_FALLBACK%" "%MODELS_DIR%\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF" ".gguf" "*" || exit /b 1
+) else if "%HIGHVRAM%"=="1" (
   echo [STEP] highvram mode enabled: full text-encoder assets
   call :ensure_repo "%META_LLAMA_REPO_URL%" "%MODELS_DIR%\Meta-Llama-3-8B-Instruct" "model.safetensors.index.json" "*" || exit /b 1
   call :ensure_repo_any "%LLM2VEC_PEFT_REPO_URL%" "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised" "adapter_model.safetensors" "model.safetensors" "*" || exit /b 1
 ) else (
   call :ensure_repo_with_fallback "%LLM2VEC_NF4_REPO_URL%" "%LLM2VEC_NF4_REPO_URL_FALLBACK%" "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4" "model.safetensors" "*" || exit /b 1
-)
-if /I "%DOWNLOAD_GGUF%"=="1" (
-  echo [STEP] CPU gguf mode enabled: downloading GGUF text encoder model
-  call :ensure_repo_with_fallback "%GGUF_REPO_URL%" "%GGUF_REPO_URL_FALLBACK%" "%MODELS_DIR%\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF" ".gguf" "*" || exit /b 1
 )
 
 echo [OK] download_model complete.

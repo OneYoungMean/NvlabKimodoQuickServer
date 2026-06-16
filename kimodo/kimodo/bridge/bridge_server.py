@@ -36,6 +36,19 @@ def _default_bridge_log_path(root: str) -> str:
     return os.path.join(root, "log", "bridge_server.log")
 
 
+def _detect_total_vram_gb() -> float:
+    """Total VRAM of cuda:0 in GiB, or 0.0 when no usable CUDA device exists."""
+    try:
+        import torch
+
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            props = torch.cuda.get_device_properties(0)
+            return float(props.total_memory) / (1024 ** 3)
+    except Exception:
+        pass
+    return 0.0
+
+
 def _write_text_atomic(path: str, content: str) -> None:
     dir_path = os.path.dirname(path)
     if dir_path:
@@ -760,18 +773,41 @@ def main():
             _log(f"[bridge] load error {state['error']}")
             return
 
-        device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
-        # Soft CUDA fallback: a caller may still pass --device cuda explicitly (e.g.
-        # a cuda-specific stress test, or an external script). Honor it only when a
-        # usable GPU exists; otherwise fall back to CPU instead of crashing later
-        # with "No CUDA GPUs are available". The normal launch path passes no device
-        # and is auto-resolved by is_available() above, so this is a safety net.
-        if str(device).lower().startswith("cuda") and not torch.cuda.is_available():
-            _log(f"[bridge] requested device '{device}' but CUDA is unavailable; falling back to CPU.")
-            _out({"status": "loading", "message": f"CUDA unavailable; running on CPU instead of {device}."})
-            device = "cpu"
-        cpu_encoder_mode = os.environ.get("KIMODO_CPU_TEXT_ENCODER", "").strip().lower()
-        if cpu_encoder_mode == "gguf" and str(device).lower().startswith("cpu"):
+        # --- Three-tier VRAM detection ---
+        # <2 GB total  → kimodo on CPU, text encoder via llama.cpp GGUF
+        # >=2 GB & <6 GB → kimodo on cuda:0, text encoder via llama.cpp GGUF
+        # >=6 GB        → kimodo on cuda:0, text encoder via local LLM2Vec (existing)
+        total_vram_gb = _detect_total_vram_gb()
+        _log(f"[bridge] detected total VRAM: {total_vram_gb:.2f} GB")
+
+        # Determine whether to use GGUF encoder.  User override wins.
+        force_gguf_env = os.environ.get("KIMODO_FORCE_GGUF", "").strip()
+        if force_gguf_env == "1":
+            use_gguf_encoder = True
+        elif force_gguf_env == "0":
+            use_gguf_encoder = False
+        else:
+            use_gguf_encoder = total_vram_gb < 6.0
+
+        # Determine kimodo device.
+        if args.device:
+            device = args.device
+            # Soft CUDA fallback: honor explicit --device only when GPU exists.
+            if str(device).lower().startswith("cuda") and not torch.cuda.is_available():
+                _log(f"[bridge] requested device '{device}' but CUDA is unavailable; falling back to CPU.")
+                _out({"status": "loading", "message": f"CUDA unavailable; running on CPU instead of {device}."})
+                device = "cpu"
+        else:
+            # Auto-decide based on tier.
+            if total_vram_gb < 2.0 or not torch.cuda.is_available():
+                device = "cpu"
+            else:
+                device = "cuda:0"
+
+        _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} use_gguf_encoder={use_gguf_encoder}")
+
+        # Start llama.cpp GGUF text-encoder service when selected.
+        if use_gguf_encoder:
             try:
                 gguf_path = os.environ.get("KIMODO_GGUF_MODEL_PATH", "").strip()
                 gguf_ctx = int(os.environ.get("KIMODO_GGUF_CTX", "4096"))
@@ -787,8 +823,11 @@ def main():
                 os.environ["TEXT_ENCODER_MODE"] = "api"
                 os.environ["TEXT_ENCODER_API_BACKEND"] = "llama"
                 os.environ["TEXT_ENCODER_URL"] = llama_service.base_url
+                os.environ["KIMODO_CPU_TEXT_ENCODER"] = "gguf"
+                # Prevent local LLM2Vec from loading onto GPU unnecessarily.
+                os.environ["TEXT_ENCODER_DEVICE"] = "cpu"
                 _log(
-                    f"[bridge] cpu gguf text encoder enabled. "
+                    f"[bridge] gguf text encoder enabled (tier: vram<6G). "
                     f"url={llama_service.base_url} model={llama_service.model_file}"
                 )
             except Exception as exc:
@@ -797,6 +836,11 @@ def main():
                     state["loading"] = False
                 _log(f"[bridge] llama startup error {exc}")
                 return
+        else:
+            # >=6G tier: use local LLM2Vec directly, skip the auto-mode API probe
+            # which would waste time trying to reach a non-existent port 9550.
+            os.environ["TEXT_ENCODER_MODE"] = "local"
+            _log("[bridge] local LLM2Vec text encoder selected (tier: vram>=6G).")
         _set_loading_message(f"Loading {args.model} on {device}...")
         _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
         _log(f"[bridge] load stage: load_model start model={args.model} device={device}")
