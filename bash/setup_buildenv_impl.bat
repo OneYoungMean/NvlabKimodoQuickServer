@@ -527,17 +527,32 @@ if /I "%VALIDATE_MODE%"=="cpu" (
   exit /b 0
 )
 echo [STEP] Validating CUDA torch runtime...
-"%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if (torch.cuda.is_available() and torch.version.cuda is not None) else 2)"
+rem Step 1: verify the BUILD is sane -- torch imports and is a CUDA build
+rem (torch.version.cuda is not None). This catches a broken install or a stale
+rem +cpu wheel. A bad build is still a hard failure.
+"%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if torch.version.cuda is not None else 2)"
 if errorlevel 1 (
   echo [ERROR] Python environment is abnormal for CUDA runtime.
   echo [ERROR] Please reinstall setup with auto mode.
   exit /b 1
 )
-rem is_available() alone is not enough: an architecture mismatch (e.g. a Maxwell/
-rem Pascal card with a cu128 build) reports available=True yet fails the moment a
-rem real kernel launches with "no kernel image is available for execution".
-rem Launch a tiny real kernel to catch that here instead of at inference time.
-rem rc=3 signals "loadable but cannot run kernels" so the caller can fall back.
+rem Step 2: probe runtime CUDA availability separately from the build check.
+rem When CUDA is unavailable (no usable GPU/driver, e.g. a CPU-only or remote
+rem machine), we deliberately do NOT fail: the cu128 build runs fine on CPU, and
+rem keeping a single cu128 torch everywhere guarantees install consistency. The
+rem runtime (bridge_server) already falls back to CPU when is_available() is False.
+"%VENV_PY%" -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" >nul 2>nul
+if errorlevel 1 (
+  echo [WARN] CUDA not available on this machine; cu128 torch will run on CPU.
+  echo [WARN] Build is a valid cu128 torch -- accepting it and skipping kernel test.
+  exit /b 0
+)
+rem Step 3: CUDA is available -- but is_available() alone is not enough. An
+rem architecture mismatch (e.g. a Maxwell/Pascal card with a cu128 build) reports
+rem available=True yet fails the moment a real kernel launches with "no kernel
+rem image is available for execution". Launch a tiny real kernel to catch that
+rem here instead of at inference time. rc=3 signals "loadable but cannot run
+rem kernels" so the caller can fall back to an architecture-matched build.
 "%VENV_PY%" -c "import torch,sys; t=torch.zeros(8,device='cuda'); (t+1).sum().item(); torch.cuda.synchronize(); print('kernel_ok'); sys.exit(0)" 2>nul
 if errorlevel 1 (
   echo [WARN] GPU kernel launch test failed despite cuda being reported available.
