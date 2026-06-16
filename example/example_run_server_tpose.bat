@@ -25,8 +25,14 @@ if not defined RUNSERVER_EXIT_GRACE_SEC set "RUNSERVER_EXIT_GRACE_SEC=15"
 
 set "MODEL=Kimodo-SOMA-RP-v1"
 if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
-set "DEVICE=%KIMODO_TEST_DEVICE%"
-if not defined DEVICE set "DEVICE=cuda"
+rem Device policy: only an explicit CPU request is forwarded as --device cpu (it is
+rem a mode switch that drives setup to install the cpu torch build and enables the
+rem gguf text encoder). Otherwise DEVICE stays empty and we do NOT pass --device at
+rem all -- run_server/bridge then auto-select via torch.cuda.is_available()
+rem (GPU when present, CPU fallback when not). Passing "cuda" explicitly is avoided
+rem because it would bypass that auto-detection and crash on CPU-only machines.
+set "DEVICE="
+if /I "%KIMODO_TEST_DEVICE%"=="cpu" set "DEVICE=cpu"
 set "MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
 set "USE_VENV_ARG=0"
 
@@ -48,7 +54,11 @@ if defined KIMODO_TEST_DEVICE (
 
 echo [TEST] ROOT_DIR=!ROOT_DIR!
 echo [TEST] MODEL=!MODEL!
-echo [TEST] DEVICE=!DEVICE!
+if defined DEVICE (
+  echo [TEST] DEVICE=!DEVICE!
+) else (
+  echo [TEST] DEVICE=^<auto^>
+)
 if defined MODELS_ROOT (
   echo [TEST] MODELS_ROOT=!MODELS_ROOT!
 ) else (
@@ -63,7 +73,8 @@ call :archive_file "%SERVER_LOG%"
 if exist "!BRIDGE_SERVER_LOG!" call :archive_file "!BRIDGE_SERVER_LOG!"
 if exist "!BRIDGE_MESSAGE_LOG!" call :archive_file "!BRIDGE_MESSAGE_LOG!"
 
-set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%','--device','%DEVICE%');"
+set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%');"
+if defined DEVICE call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--device','%DEVICE%');"
 if defined MODELS_ROOT call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--models-root','%MODELS_ROOT%');"
 call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--output','file','--log','%SERVER_LOG%');"
 set "LAUNCH_PS_CMD=!LAUNCH_PS_CMD! $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"

@@ -761,6 +761,15 @@ def main():
             return
 
         device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        # Soft CUDA fallback: a caller may still pass --device cuda explicitly (e.g.
+        # a cuda-specific stress test, or an external script). Honor it only when a
+        # usable GPU exists; otherwise fall back to CPU instead of crashing later
+        # with "No CUDA GPUs are available". The normal launch path passes no device
+        # and is auto-resolved by is_available() above, so this is a safety net.
+        if str(device).lower().startswith("cuda") and not torch.cuda.is_available():
+            _log(f"[bridge] requested device '{device}' but CUDA is unavailable; falling back to CPU.")
+            _out({"status": "loading", "message": f"CUDA unavailable; running on CPU instead of {device}."})
+            device = "cpu"
         cpu_encoder_mode = os.environ.get("KIMODO_CPU_TEXT_ENCODER", "").strip().lower()
         if cpu_encoder_mode == "gguf" and str(device).lower().startswith("cpu"):
             try:
