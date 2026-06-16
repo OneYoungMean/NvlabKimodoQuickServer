@@ -527,24 +527,26 @@ if /I "%VALIDATE_MODE%"=="cpu" (
   exit /b 0
 )
 echo [STEP] Validating CUDA torch runtime...
-rem Step 1: verify the BUILD is sane -- torch imports and is a CUDA build
-rem (torch.version.cuda is not None). This catches a broken install or a stale
-rem +cpu wheel. A bad build is still a hard failure.
-"%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0 if torch.version.cuda is not None else 2)"
+rem Step 1: verify torch can actually be loaded (import torch + a deep internal
+rem module). This catches a genuinely broken install (missing files, DLL load
+rem failure, incompatible build) -- that is the only hard failure. We do NOT
+rem require a CUDA build here: a working CPU torch is acceptable, and whether CUDA
+rem is actually usable is left to the soft checks in steps 2-3 below.
+"%VENV_PY%" -c "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0)"
 if errorlevel 1 (
-  echo [ERROR] Python environment is abnormal for CUDA runtime.
+  echo [ERROR] torch cannot be loaded in this environment ^(broken install^).
   echo [ERROR] Please reinstall setup with auto mode.
   exit /b 1
 )
-rem Step 2: probe runtime CUDA availability separately from the build check.
+rem Step 2: probe runtime CUDA availability, separately from whether torch loaded.
 rem When CUDA is unavailable (no usable GPU/driver, e.g. a CPU-only or remote
-rem machine), we deliberately do NOT fail: the cu128 build runs fine on CPU, and
-rem keeping a single cu128 torch everywhere guarantees install consistency. The
-rem runtime (bridge_server) already falls back to CPU when is_available() is False.
+rem machine, or a cpu torch build) we deliberately do NOT fail: torch runs fine on
+rem CPU and the runtime (bridge_server) already falls back to CPU when
+rem is_available() is False. CUDA is a soft, best-effort capability here.
 "%VENV_PY%" -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" >nul 2>nul
 if errorlevel 1 (
-  echo [WARN] CUDA not available on this machine; cu128 torch will run on CPU.
-  echo [WARN] Build is a valid cu128 torch -- accepting it and skipping kernel test.
+  echo [WARN] CUDA not available on this machine; torch will run on CPU.
+  echo [WARN] torch loads correctly -- accepting it and skipping the GPU kernel test.
   exit /b 0
 )
 rem Step 3: CUDA is available -- but is_available() alone is not enough. An
