@@ -126,8 +126,12 @@ if errorlevel 1 (
 )
 
 set "TORCH_RUNTIME=unknown"
-for /f "usebackq delims=" %%I in (`"!VENV_PY!" -c "import torch; print('cuda' if torch.version.cuda is not None else 'cpu')"` ) do (
-  if not defined TORCH_RUNTIME set "TORCH_RUNTIME=%%I"
+set "TORCH_RUNTIME_FILE=%TEMP%\kimodo_torch_runtime_%RANDOM%%RANDOM%.txt"
+del /q "!TORCH_RUNTIME_FILE!" >nul 2>nul
+"!VENV_PY!" -c "import torch; print('cuda' if torch.version.cuda is not None else 'cpu')" > "!TORCH_RUNTIME_FILE!" 2>nul
+if exist "!TORCH_RUNTIME_FILE!" (
+  set /p TORCH_RUNTIME=<"!TORCH_RUNTIME_FILE!"
+  del /q "!TORCH_RUNTIME_FILE!" >nul 2>nul
 )
 if not defined TORCH_RUNTIME set "TORCH_RUNTIME=unknown"
 

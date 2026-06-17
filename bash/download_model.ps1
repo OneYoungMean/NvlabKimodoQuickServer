@@ -26,8 +26,6 @@ $script:VramProbeTorchCuda = "unknown"
 $script:VramProbeStatus = "unknown"
 $script:TextEncoderDownloadRequired = $true
 $script:TextEncoderStateReason = "unset"
-$script:VramProbeLogEnabled = $true
-
 $script:Llm2VecNf4RepoUrl = if ($env:KIMODO_LLM2VEC_NF4_REPO_URL) { $env:KIMODO_LLM2VEC_NF4_REPO_URL } else { "https://www.modelscope.cn/oneyoungmean/KIMODO-Meta3_llm2vec_NF4.git" }
 $script:Llm2VecNf4RepoUrlFallback = if ($env:KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK) { $env:KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK } else { "https://huggingface.co/Aero-Ex/KIMODO-Meta3_llm2vec_NF4" }
 $script:GgufRepoUrl = if ($env:KIMODO_GGUF_REPO_URL) { $env:KIMODO_GGUF_REPO_URL } else { "https://www.modelscope.cn/LLM-Research/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF.git" }
@@ -404,7 +402,6 @@ function Ensure-RepoSnapshot {
   & $script:VenvPy -c $py *> $snapshotLog
   $snapshotRc = $LASTEXITCODE
   if (Test-Path $snapshotLog -PathType Leaf) {
-    Get-Content -LiteralPath $snapshotLog | ForEach-Object { Write-Line "[DEBUG] snapshot fallback: $_" }
     Remove-Item -LiteralPath $snapshotLog -Force -ErrorAction SilentlyContinue
   }
   if ($snapshotRc -ne 0) {
@@ -527,8 +524,6 @@ function Get-TextEncoderAssetState {
 }
 
 function Get-VramDecision {
-  Write-Line "[DEBUG] decide_download_gguf: run_device=$($script:RunDevice) cpu_text_encoder=$($script:CpuTextEncoder) venv=$($script:VenvPy)"
-
   if ($script:RunDevice -and $script:RunDevice.ToLowerInvariant() -eq "cpu" -and $script:CpuTextEncoder.ToLowerInvariant() -eq "gguf") {
     Write-Line "[INFO] Explicit CPU run (cpu text encoder=gguf) -> GGUF download enabled."
     return [pscustomobject]@{
@@ -547,7 +542,6 @@ function Get-VramDecision {
   $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
   if ($null -ne $nvidiaSmi) {
     $probeStatus = "nvidia-smi"
-    if ($script:VramProbeLogEnabled) { Write-Line "[DEBUG] VRAM probe backend: nvidia-smi ($($nvidiaSmi.Source))" }
     $rawRows = & $nvidiaSmi.Source --query-gpu=memory.total --format=csv,noheader,nounits 2>$null
     $maxMb = $null
     foreach ($row in $rawRows) {
@@ -560,8 +554,7 @@ function Get-VramDecision {
     if ($null -ne $maxMb) {
       $vramTotalGb = [math]::Round($maxMb / 1024.0, 2).ToString()
       $probeBackend = "nvidia-smi"
-      if ($script:VramProbeLogEnabled) { Write-Line "[DEBUG] VRAM probe result: max_total=${vramTotalGb}GB from nvidia-smi" }
-    } elseif ($script:VramProbeLogEnabled) {
+    } else {
       Write-Line "[WARN] VRAM probe via nvidia-smi returned no rows."
     }
   }
@@ -569,7 +562,6 @@ function Get-VramDecision {
   if ($vramTotalGb -eq "none") {
     if ($script:VenvPy -and (Test-Path $script:VenvPy -PathType Leaf)) {
       $probeStatus = "torch"
-      if ($script:VramProbeLogEnabled) { Write-Line "[DEBUG] VRAM probe fallback python: $($script:VenvPy)" }
       $probeLog = Join-Path $env:TEMP ("kimodo_vram_probe_{0}.log" -f ([System.Guid]::NewGuid().ToString("N").Substring(0,8)))
       $py = "import torch; print('probe_total=' + (str(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2)) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')); print('available=' + str(torch.cuda.is_available())); print('device_count=' + str(torch.cuda.device_count())); print('torch_cuda=' + str(torch.version.cuda))"
       & $script:VenvPy -c $py *> $probeLog
@@ -583,13 +575,10 @@ function Get-VramDecision {
         }
         Remove-Item -LiteralPath $probeLog -Force -ErrorAction SilentlyContinue
       }
-      if ($script:VramProbeLogEnabled) {
-        Write-Line "[DEBUG] VRAM probe rc=$probeRc available=$($script:VramProbeAvailable) device_count=$($script:VramProbeDeviceCount) torch_cuda=$($script:VramProbeTorchCuda) total=$vramTotalGb"
-      }
       if ($vramTotalGb -ne "none") { $probeBackend = "torch" }
     } else {
       $probeStatus = "missing_python"
-      if ($script:VramProbeLogEnabled) { Write-Line "[WARN] VRAM probe skipped: venv python not found: $($script:VenvPy)" }
+      Write-Line "[WARN] VRAM probe skipped: venv python not found: $($script:VenvPy)"
     }
   }
 
@@ -632,11 +621,6 @@ function Invoke-Main {
   New-Item -ItemType Directory -Force -Path $script:ModelsDir | Out-Null
   Set-LocalGitContext
 
-  Write-Line "[DEBUG] context: root=$script:RootDir models=$script:ModelsDir output=$script:OutputMode log=$script:LogPath"
-  Write-Line "[DEBUG] args: model=$script:ModelName device=$script:RunDevice cpu_text_encoder=$script:CpuTextEncoder highvram=$([int]$script:HighVram) force_sync=$([int]$script:ForceSync) unlock_stale=$([int]$script:UnlockStale)"
-  Write-Line "[DEBUG] venv: $script:VenvPy"
-  Write-Line "[DEBUG] env hints: KIMODO_CPU_TEXT_ENCODER=$($env:KIMODO_CPU_TEXT_ENCODER) KIMODO_FORCE_GGUF=$($env:KIMODO_FORCE_GGUF)"
-
   Write-Line "[STEP] Downloading models (single-thread)..."
   $alias = Resolve-ModelAlias $script:ModelName
   if ($null -eq $alias) { return 1 }
@@ -656,14 +640,11 @@ function Invoke-Main {
   }
 
   Write-ProgressLine "prepare" $modelDirName "Preparing model sync"
-  Write-Line "[DEBUG] alias resolved: name=$($script:ModelName) dir=$modelDirName repo=$modelRepoName"
-  Write-Line "[DEBUG] model repo urls: primary=$modelRepoUrl fallback=$modelRepoFallback"
   if (-not (Ensure-RepoWithFallback $modelRepoUrl $modelRepoFallback (Join-Path $script:ModelsDir $modelDirName) "model.safetensors" "*")) {
     return 1
   }
 
   $assetState = Get-TextEncoderAssetState
-  Write-Line "[DEBUG] text encoder state: required=$([int]$assetState.Required) reason=$($assetState.Reason) gguf=$($assetState.GgufPresent) nf4=$($assetState.Nf4Present) full_base=$($assetState.FullBasePresent) full_peft=$($assetState.FullPeftPresent)"
   if (-not $assetState.Required) {
     $script:GgufDecisionReason = "assets_present"
     $script:DownloadGguf = "skip"
@@ -678,7 +659,6 @@ function Invoke-Main {
   $script:DownloadGguf = if ($decision.DownloadGguf) { "1" } else { "0" }
   $script:GgufDecisionReason = $decision.Reason
   $script:VramProbeStatus = $decision.ProbeStatus
-  Write-Line "[DEBUG] GGUF decision: DOWNLOAD_GGUF=$script:DownloadGguf reason=$($decision.Reason) vram_total=$($decision.VramTotalGb) probe_status=$($decision.ProbeStatus)"
 
   if ($decision.DownloadGguf) {
     Write-ProgressLine "text_encoder" "gguf" "Downloading GGUF text encoder"
