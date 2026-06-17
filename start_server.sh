@@ -177,6 +177,9 @@ if [[ ! -x "${VENV_PY}" ]]; then
 fi
 
 # ---- download phase ---------------------------------------------------------
+# Explicit CPU run implies the GGUF text encoder. download_model.sh owns the
+# GGUF-vs-local download decision; we only forward device + cpu-encoder intent.
+# USE_CPU_GGUF still drives the runtime force flag below.
 if [[ -n "${RUN_DEVICE}" && "${RUN_DEVICE,,}" == "cpu" && "${CPU_TEXT_ENCODER,,}" == "gguf" ]]; then
   USE_CPU_GGUF=1
 fi
@@ -185,9 +188,9 @@ if [[ "${USING_EXTERNAL_MODELS}" == "1" ]]; then
 else
   echo "[STEP] Downloading model assets for model=${MODEL_NAME} highvram=${HIGHVRAM}..."
   dl_args=(--output "${OUTPUT_MODE}" --log "${LOG_DIR}/${LOG_NAME_DOWNLOAD}"
-    --unlock-stale --model "${MODEL_RUN_NAME}" --venv "${VENV_PY}")
+    --unlock-stale --model "${MODEL_RUN_NAME}" --venv "${VENV_PY}"
+    --device "${RUN_DEVICE}" --cpu-text-encoder "${CPU_TEXT_ENCODER}")
   [[ "${HIGHVRAM}" == "1" ]] && dl_args+=(--highvram)
-  [[ "${USE_CPU_GGUF}" == "1" ]] && dl_args+=(--download-gguf)
   bash "${DOWNLOAD_SH}" "${dl_args[@]}" || exit 1
 fi
 

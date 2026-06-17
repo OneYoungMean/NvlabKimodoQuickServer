@@ -235,15 +235,11 @@ if not exist "!VENV_PY!" (
 )
 
 REM Explicit CPU run implies the GGUF text encoder regardless of detected VRAM.
-REM download_model decides GGUF-vs-local on its own (by VRAM total) unless we
-REM pass --download-gguf to force it for a CPU run.
-set "DOWNLOAD_GGUF_ARG="
+REM download_model owns the GGUF-vs-local download decision; we only forward the
+REM device and cpu-encoder intent. USE_CPU_GGUF still drives the runtime force flag.
 if defined RUN_DEVICE (
   if /I "!RUN_DEVICE!"=="cpu" (
-    if /I "!CPU_TEXT_ENCODER!"=="gguf" (
-      set "USE_CPU_GGUF=1"
-      set "DOWNLOAD_GGUF_ARG=--download-gguf"
-    )
+    if /I "!CPU_TEXT_ENCODER!"=="gguf" set "USE_CPU_GGUF=1"
   )
 )
 if "%USING_EXTERNAL_MODELS%"=="1" (
@@ -251,9 +247,9 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
 ) else (
   echo [STEP] Downloading model assets for model=!MODEL_NAME! highvram=!HIGHVRAM!...
   if "%HIGHVRAM%"=="1" (
-    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --highvram !DOWNLOAD_GGUF_ARG!
+    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
   ) else (
-    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" !DOWNLOAD_GGUF_ARG!
+    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
   )
   if errorlevel 1 exit /b 1
 )

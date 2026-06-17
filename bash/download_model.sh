@@ -15,9 +15,11 @@ LOG_PATH="${LOG_DIR}/download_model.log"
 UNLOCK_STALE=0
 FORCE_SYNC=0
 # GGUF download decision is made internally by decide_download_gguf().
-# DOWNLOAD_GGUF stays "auto" until then; --download-gguf forces it (CPU run).
+# DOWNLOAD_GGUF stays "auto" until then. An explicit CPU run (--device cpu with
+# cpu text encoder = gguf) forces GGUF; otherwise the decision is by VRAM total.
 DOWNLOAD_GGUF="auto"
-FORCE_GGUF=0
+RUN_DEVICE=""
+CPU_TEXT_ENCODER="gguf"
 VENV_PY=""
 MODEL_NAME="Kimodo-SOMA-RP-v1"
 HIGHVRAM=0
@@ -36,7 +38,8 @@ while [[ $# -gt 0 ]]; do
     --unlock-stale) UNLOCK_STALE=1; shift ;;
     --force) FORCE_SYNC=1; shift ;;
     --model) MODEL_NAME="$2"; shift 2 ;;
-    --download-gguf) FORCE_GGUF=1; shift ;;
+    --device) RUN_DEVICE="$2"; shift 2 ;;
+    --cpu-text-encoder) CPU_TEXT_ENCODER="$2"; shift 2 ;;
     --venv) VENV_PY="$2"; shift 2 ;;
     --highvram) HIGHVRAM=1; shift ;;
     *) shift ;;
@@ -226,11 +229,12 @@ ensure_repo_any() {
 }
 
 # Decide whether the GGUF text encoder must be downloaded.
-# Rule: explicit --download-gguf (CPU run) forces GGUF; otherwise probe total
-# VRAM via the venv python. <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
+# Rule: an explicit CPU run (--device cpu with cpu text encoder = gguf) forces
+# GGUF regardless of VRAM; otherwise probe total VRAM via the venv python.
+# <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
 decide_download_gguf() {
-  if [[ "${FORCE_GGUF}" == "1" ]]; then
-    echo "[INFO] --download-gguf forced -> GGUF download enabled."
+  if [[ "${RUN_DEVICE,,}" == "cpu" && "${CPU_TEXT_ENCODER,,}" == "gguf" ]]; then
+    echo "[INFO] Explicit CPU run (cpu text encoder=gguf) -> GGUF download enabled."
     DOWNLOAD_GGUF=1
     return 0
   fi

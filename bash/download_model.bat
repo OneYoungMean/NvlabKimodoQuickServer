@@ -12,9 +12,11 @@ set "LOG_PATH=%LOG_DIR%\download_model.log"
 set "UNLOCK_STALE=0"
 set "FORCE_SYNC=0"
 REM GGUF download decision is made internally by :decide_download_gguf.
-REM DOWNLOAD_GGUF stays "auto" until then; --download-gguf forces it (CPU run).
+REM DOWNLOAD_GGUF stays "auto" until then. An explicit CPU run (--device cpu with
+REM cpu text encoder = gguf) forces GGUF; otherwise the decision is by VRAM total.
 set "DOWNLOAD_GGUF=auto"
-set "FORCE_GGUF=0"
+set "RUN_DEVICE="
+set "CPU_TEXT_ENCODER=gguf"
 set "VENV_PY="
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
@@ -67,8 +69,15 @@ if /I "%~1"=="--model" (
   shift
   goto parse_args
 )
-if /I "%~1"=="--download-gguf" (
-  set "FORCE_GGUF=1"
+if /I "%~1"=="--device" (
+  set "RUN_DEVICE=%~2"
+  shift
+  shift
+  goto parse_args
+)
+if /I "%~1"=="--cpu-text-encoder" (
+  set "CPU_TEXT_ENCODER=%~2"
+  shift
   shift
   goto parse_args
 )
@@ -142,10 +151,11 @@ exit /b 0
 
 :decide_download_gguf
 :: Decide whether the GGUF text encoder must be downloaded.
-:: Rule: explicit --download-gguf (CPU run) forces GGUF; otherwise probe total
-:: VRAM via the venv python. <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
-if "%FORCE_GGUF%"=="1" (
-  echo [INFO] --download-gguf forced -^> GGUF download enabled.
+:: Rule: an explicit CPU run (--device cpu with cpu text encoder = gguf) forces
+:: GGUF regardless of VRAM; otherwise probe total VRAM via the venv python.
+:: <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
+if defined RUN_DEVICE if /I "%RUN_DEVICE%"=="cpu" if /I "%CPU_TEXT_ENCODER%"=="gguf" (
+  echo [INFO] Explicit CPU run ^(cpu text encoder=gguf^) -^> GGUF download enabled.
   set "DOWNLOAD_GGUF=1"
   exit /b 0
 )
@@ -331,10 +341,16 @@ exit /b 0
 
 :ensure_gguf_presence
 set "GGUF_DIR=%~1"
-set "GGUF_COUNT=0"
-for /f %%G in ('dir /b /s "%GGUF_DIR%\*.gguf" 2^>nul ^| find /c /v ""') do set "GGUF_COUNT=%%G"
-if not defined GGUF_COUNT set "GGUF_COUNT=0"
-if "%GGUF_COUNT%"=="0" exit /b 1
+set "GGUF_FILE="
+for /f "delims=" %%G in ('dir /b /s "%GGUF_DIR%\*.gguf" 2^>nul') do (
+  if not defined GGUF_FILE set "GGUF_FILE=%%G"
+)
+if not defined GGUF_FILE exit /b 1
+REM A valid gguf file must be larger than 1KiB (LFS pointer files are ~100 bytes).
+set "GGUF_SIZE=0"
+for %%I in ("%GGUF_FILE%") do set "GGUF_SIZE=%%~zI"
+if not defined GGUF_SIZE exit /b 1
+if %GGUF_SIZE% LEQ 1024 exit /b 1
 exit /b 0
 
 :normalize_repo_url
