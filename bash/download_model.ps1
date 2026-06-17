@@ -44,6 +44,33 @@ function Write-Line {
   Write-Host $Message
 }
 
+function Sanitize-ProgressValue {
+  param([string]$Value)
+  if ([string]::IsNullOrWhiteSpace($Value)) { return "-" }
+  return $Value.Replace("|", "/").Replace("`r", " ").Replace("`n", " ").Trim()
+}
+
+function Get-TargetLabel {
+  param([string]$PathOrName)
+  if ([string]::IsNullOrWhiteSpace($PathOrName)) { return "-" }
+  $leaf = Split-Path -Leaf $PathOrName
+  if ([string]::IsNullOrWhiteSpace($leaf)) { return $PathOrName.Trim() }
+  return $leaf.Trim()
+}
+
+function Write-ProgressLine {
+  param(
+    [string]$Phase,
+    [string]$Target,
+    [string]$Message
+  )
+
+  $phaseValue = Sanitize-ProgressValue $Phase
+  $targetValue = Sanitize-ProgressValue (Get-TargetLabel $Target)
+  $messageValue = Sanitize-ProgressValue $Message
+  Write-Line "[PROGRESS] phase=$phaseValue|target=$targetValue|message=$messageValue"
+}
+
 function Parse-Args {
   param([string[]]$InputArgs)
 
@@ -236,11 +263,14 @@ function Ensure-Repo {
 
   if (-not $LfsInclude) { $LfsInclude = $ReqFile }
   $repoUrl = Normalize-RepoUrl $RepoUrl
+  $targetLabel = Get-TargetLabel $DestDir
 
   if (-not $script:ForceSync) {
     if ($ReqFile -eq ".gguf") {
       if ((Test-Path $DestDir -PathType Container) -and (Test-GgufPresence $DestDir)) {
+        Write-ProgressLine "cache_hit" $targetLabel "Using existing GGUF files"
         Write-Line "[INFO] Skip existing gguf model: $DestDir"
+        Write-ProgressLine "done" $targetLabel "Model files ready"
         return $true
       }
       if (Test-Path $DestDir -PathType Container) {
@@ -249,8 +279,13 @@ function Ensure-Repo {
     } else {
       $reqPath = Join-Path $DestDir $ReqFile
       if (Test-Path $reqPath -PathType Leaf) {
+        Write-ProgressLine "cache_hit" $targetLabel "Using existing model files"
         Write-Line "[INFO] Skip existing model: $DestDir"
-        return (Repair-Safetensor $DestDir $ReqFile $LfsInclude)
+        $repairOk = (Repair-Safetensor $DestDir $ReqFile $LfsInclude)
+        if ($repairOk) {
+          Write-ProgressLine "done" $targetLabel "Model files ready"
+        }
+        return $repairOk
       }
     }
   }
@@ -260,6 +295,7 @@ function Ensure-Repo {
   }
 
   if (-not (Test-Path $DestDir -PathType Container)) {
+    Write-ProgressLine "clone" $targetLabel "Cloning repository"
     Write-Line "[STEP] Cloning $repoUrl"
     $env:GIT_LFS_SKIP_SMUDGE = "1"
     & git clone --depth 1 $repoUrl $DestDir
@@ -268,6 +304,7 @@ function Ensure-Repo {
     if ($cloneRc -ne 0) { return $false }
   } else {
     if (-not (Prepare-Repo $DestDir)) { return $false }
+    Write-ProgressLine "update" $targetLabel "Updating existing repository"
     Write-Line "[STEP] Updating existing repo: $DestDir"
     $env:GIT_LFS_SKIP_SMUDGE = "1"
     & git -C $DestDir pull
@@ -275,6 +312,7 @@ function Ensure-Repo {
     Remove-Item Env:\GIT_LFS_SKIP_SMUDGE -ErrorAction SilentlyContinue
     if ($pullRc -ne 0) {
       if (-not (Backup-Dir $DestDir)) { return $false }
+      Write-ProgressLine "clone" $targetLabel "Re-cloning repository"
       Write-Line "[STEP] Re-cloning $repoUrl"
       $env:GIT_LFS_SKIP_SMUDGE = "1"
       & git clone --depth 1 $repoUrl $DestDir
@@ -285,9 +323,11 @@ function Ensure-Repo {
   }
 
   if (-not (Prepare-Repo $DestDir)) { return $false }
+  Write-ProgressLine "lfs" $targetLabel "Downloading model files"
   & git -C $DestDir lfs pull --include=$LfsInclude
   if ($LASTEXITCODE -ne 0) { return $false }
 
+  Write-ProgressLine "validate" $targetLabel "Validating downloaded files"
   if ($ReqFile -eq ".gguf") {
     if (-not (Test-GgufPresence $DestDir)) {
       Write-Line "[ERROR] Missing .gguf files after sync: $DestDir"
@@ -307,7 +347,11 @@ function Ensure-Repo {
     }
   }
 
-  return (Repair-Safetensor $DestDir $ReqFile $LfsInclude)
+  $repairOk = (Repair-Safetensor $DestDir $ReqFile $LfsInclude)
+  if ($repairOk) {
+    Write-ProgressLine "done" $targetLabel "Model files ready"
+  }
+  return $repairOk
 }
 
 function Get-SnapshotSource {
@@ -334,6 +378,7 @@ function Ensure-RepoSnapshot {
   if (-not $LfsInclude) { $LfsInclude = $ReqFile }
   $repoUrl = Normalize-RepoUrl $RepoUrl
   $source = Get-SnapshotSource $repoUrl
+  $targetLabel = Get-TargetLabel $DestDir
   if ($null -eq $source) { return $false }
 
   if (-not $script:VenvPy) {
@@ -352,6 +397,7 @@ function Ensure-RepoSnapshot {
   $allowPatterns = if ($ReqFile -eq ".gguf") { "*.gguf" } else { $LfsInclude }
   if (-not $allowPatterns) { $allowPatterns = "*" }
 
+  Write-ProgressLine "snapshot" $targetLabel "Downloading files via snapshot fallback"
   Write-Line "[STEP] Snapshot fallback download $($source.RepoId) -> $DestDir"
   $snapshotLog = Join-Path $env:TEMP ("kimodo_snapshot_{0}.log" -f ([System.Guid]::NewGuid().ToString("N").Substring(0,8)))
   $py = "from huggingface_hub import snapshot_download; raw=r'$allowPatterns'; pats=None if (not raw or raw=='*') else [p.strip() for p in raw.split(',') if p.strip()]; snapshot_download(repo_id=r'$($source.RepoId)', local_dir=r'$DestDir', allow_patterns=pats, endpoint=(r'$($source.Endpoint)' if r'$($source.Endpoint)' else None), max_workers=4)"
@@ -366,6 +412,7 @@ function Ensure-RepoSnapshot {
     return $false
   }
 
+  Write-ProgressLine "validate" $targetLabel "Validating downloaded files"
   if ($ReqFile -eq ".gguf") {
     if (-not (Test-GgufPresence $DestDir)) {
       Write-Line "[ERROR] Missing .gguf files after snapshot fallback: $DestDir"
@@ -379,7 +426,11 @@ function Ensure-RepoSnapshot {
     }
   }
 
-  return (Repair-Safetensor $DestDir $ReqFile $LfsInclude)
+  $repairOk = (Repair-Safetensor $DestDir $ReqFile $LfsInclude)
+  if ($repairOk) {
+    Write-ProgressLine "done" $targetLabel "Model files ready"
+  }
+  return $repairOk
 }
 
 function Ensure-RepoWithFallback {
@@ -391,14 +442,17 @@ function Ensure-RepoWithFallback {
     [string]$LfsInclude
   )
 
+  $targetLabel = Get-TargetLabel $DestDir
   if (Ensure-Repo $PrimaryRepoUrl $DestDir $ReqFile $LfsInclude) { return $true }
   if ($FallbackRepoUrl) {
+    Write-ProgressLine "fallback" $targetLabel "Primary repo failed, trying fallback repository"
     Write-Line "[WARN] Primary repo failed, fallback to: $FallbackRepoUrl"
     if (Ensure-Repo $FallbackRepoUrl $DestDir $ReqFile $LfsInclude) {
       Write-Line "[OK] Fallback repo succeeded: $FallbackRepoUrl"
       return $true
     }
   }
+  Write-ProgressLine "snapshot_fallback" $targetLabel "Git sync failed, switching to direct download"
   Write-Line "[WARN] Git-based sync failed, trying direct file download fallback: $DestDir"
   if (Ensure-RepoSnapshot $PrimaryRepoUrl $DestDir $ReqFile $LfsInclude) { return $true }
   if ($FallbackRepoUrl) {
@@ -601,6 +655,7 @@ function Invoke-Main {
     "Kimodo-G1-SEED-v1" { $modelRepoFallback = "https://huggingface.co/nvidia/Kimodo-G1-SEED-v1" }
   }
 
+  Write-ProgressLine "prepare" $modelDirName "Preparing model sync"
   Write-Line "[DEBUG] alias resolved: name=$($script:ModelName) dir=$modelDirName repo=$modelRepoName"
   Write-Line "[DEBUG] model repo urls: primary=$modelRepoUrl fallback=$modelRepoFallback"
   if (-not (Ensure-RepoWithFallback $modelRepoUrl $modelRepoFallback (Join-Path $script:ModelsDir $modelDirName) "model.safetensors" "*")) {
@@ -612,7 +667,9 @@ function Invoke-Main {
   if (-not $assetState.Required) {
     $script:GgufDecisionReason = "assets_present"
     $script:DownloadGguf = "skip"
+    Write-ProgressLine "skip" "text_encoder" "Text encoder assets already present"
     Write-Line "[INFO] Text encoder assets already present, skip VRAM probe and encoder download."
+    Write-ProgressLine "done" "all" "download_model complete"
     Write-Line "[OK] download_model complete."
     return 0
   }
@@ -624,11 +681,13 @@ function Invoke-Main {
   Write-Line "[DEBUG] GGUF decision: DOWNLOAD_GGUF=$script:DownloadGguf reason=$($decision.Reason) vram_total=$($decision.VramTotalGb) probe_status=$($decision.ProbeStatus)"
 
   if ($decision.DownloadGguf) {
+    Write-ProgressLine "text_encoder" "gguf" "Downloading GGUF text encoder"
     Write-Line "[STEP] GGUF mode enabled: downloading GGUF text encoder (skip local NF4/full encoder)"
     if (-not (Ensure-RepoWithFallback $script:GgufRepoUrl $script:GgufRepoUrlFallback (Join-Path $script:ModelsDir "Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF") ".gguf" "*")) {
       return 1
     }
   } elseif ($script:HighVram) {
+    Write-ProgressLine "text_encoder" "highvram" "Downloading full text-encoder assets"
     Write-Line "[STEP] highvram mode enabled: full text-encoder assets"
     if (-not (Ensure-Repo $script:MetaLlamaRepoUrl (Join-Path $script:ModelsDir "Meta-Llama-3-8B-Instruct") "model.safetensors.index.json" "*")) {
       return 1
@@ -637,11 +696,13 @@ function Invoke-Main {
       return 1
     }
   } else {
+    Write-ProgressLine "text_encoder" "nf4" "Downloading NF4 text encoder"
     if (-not (Ensure-RepoWithFallback $script:Llm2VecNf4RepoUrl $script:Llm2VecNf4RepoUrlFallback (Join-Path $script:ModelsDir "KIMODO-Meta3_llm2vec_NF4") "model.safetensors" "*")) {
       return 1
     }
   }
 
+  Write-ProgressLine "done" "all" "download_model complete"
   Write-Line "[OK] download_model complete."
   return 0
 }
