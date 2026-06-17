@@ -199,17 +199,16 @@ if [[ ! -f "${MODELS_ROOT}/${MODEL_DIR_NAME}/model.safetensors" ]]; then
   exit 1
 fi
 
-if [[ "${USE_CPU_GGUF}" == "1" ]]; then
-  if [[ ! -e "${GGUF_MODEL_PATH}" ]]; then
-    echo "[ERROR] CPU gguf mode enabled but path missing: ${GGUF_MODEL_PATH}"
-    exit 1
-  fi
-  GGUF_MODEL_FILE=""
+# Prepare GGUF model path if available (used when bridge auto-selects gguf mode).
+GGUF_MODEL_FILE=""
+if [[ -e "${GGUF_MODEL_PATH}" ]]; then
   if [[ "${GGUF_MODEL_PATH}" == *.gguf ]]; then
     GGUF_MODEL_FILE="${GGUF_MODEL_PATH}"
   else
     GGUF_MODEL_FILE="$(find "${GGUF_MODEL_PATH}" -type f -name '*.gguf' 2>/dev/null | head -n 1)"
   fi
+fi
+if [[ "${USE_CPU_GGUF}" == "1" ]]; then
   if [[ -z "${GGUF_MODEL_FILE}" ]]; then
     echo "[ERROR] CPU gguf mode enabled but no .gguf found under: ${GGUF_MODEL_PATH}"
     exit 1
@@ -248,6 +247,8 @@ else
   export TEXT_ENCODER="llm2vec"
   export TEXT_ENCODER_DEVICE="${TEXT_ENCODER_DEVICE_MODE}"
 fi
+# Always export GGUF path if available so bridge can auto-fallback when VRAM is low.
+[[ -n "${GGUF_MODEL_FILE}" ]] && export KIMODO_GGUF_MODEL_PATH="${GGUF_MODEL_FILE}"
 echo "[INFO] Runtime device: ${RUN_DEVICE:-<auto>}"
 echo "[INFO] Text encoder device: ${TEXT_ENCODER_DEVICE}"
 if [[ "${USE_CPU_GGUF}" == "1" ]]; then
