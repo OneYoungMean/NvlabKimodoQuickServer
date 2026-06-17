@@ -29,7 +29,6 @@ set "DOWNLOAD_BAT=%ROOT_DIR%\bash\download_model.bat"
 set "RESOLVE_MODEL_ALIAS_BAT=%ROOT_DIR%\bash\resolve_model_alias.bat"
 set "LAUNCH_BRIDGE_PS1=%ROOT_DIR%\bash\launch_bridge.ps1"
 set "RUN_SETUP_PHASE_BAT=%ROOT_DIR%\bash\run_setup_phase.bat"
-set "RUN_DOWNLOAD_PHASE_BAT=%ROOT_DIR%\bash\run_download_phase.bat"
 set "WATCHDOG_BRIDGE_BAT=%ROOT_DIR%\bash\watchdog_bridge.bat"
 set "COMMON_ENV_BAT=%ROOT_DIR%\bash\common_env.bat"
 set "SETUP_LOCK=%ROOT_DIR%\.setup.lock"
@@ -45,7 +44,6 @@ if not defined CPU_TEXT_ENCODER set "CPU_TEXT_ENCODER=gguf"
 set "GGUF_MODEL_PATH=%KIMODO_GGUF_MODEL_PATH%"
 set "GGUF_CTX=%KIMODO_GGUF_CTX%"
 set "USE_CPU_GGUF=0"
-set "DOWNLOAD_GGUF=0"
 set "VENV_PATH_ARG="
 set "VENV_PY="
 set "USING_EXTERNAL_MODELS=0"
@@ -163,8 +161,8 @@ if not exist "!RUN_SETUP_PHASE_BAT!" (
   echo [ERROR] Missing setup phase script: !RUN_SETUP_PHASE_BAT!
   exit /b 1
 )
-if not exist "!RUN_DOWNLOAD_PHASE_BAT!" (
-  echo [ERROR] Missing download phase script: !RUN_DOWNLOAD_PHASE_BAT!
+if not exist "!DOWNLOAD_BAT!" (
+  echo [ERROR] Missing download script: !DOWNLOAD_BAT!
   exit /b 1
 )
 if not exist "!WATCHDOG_BRIDGE_BAT!" (
@@ -237,18 +235,28 @@ if not exist "!VENV_PY!" (
 )
 
 REM Explicit CPU run implies the GGUF text encoder regardless of detected VRAM.
-REM The download phase decides GGUF-vs-local on its own (by VRAM total) when the
-REM user has not pinned KIMODO_DOWNLOAD_GGUF.
+REM download_model decides GGUF-vs-local on its own (by VRAM total) unless we
+REM pass --download-gguf to force it for a CPU run.
+set "DOWNLOAD_GGUF_ARG="
 if defined RUN_DEVICE (
   if /I "!RUN_DEVICE!"=="cpu" (
     if /I "!CPU_TEXT_ENCODER!"=="gguf" (
       set "USE_CPU_GGUF=1"
-      if not defined KIMODO_DOWNLOAD_GGUF set "KIMODO_DOWNLOAD_GGUF=1"
+      set "DOWNLOAD_GGUF_ARG=--download-gguf"
     )
   )
 )
-call "!RUN_DOWNLOAD_PHASE_BAT!" "!ROOT_DIR!" "!OUTPUT_MODE!" "!USING_EXTERNAL_MODELS!" "!HIGHVRAM!" "!MODEL_RUN_NAME!" "!MODEL_NAME!" "!DOWNLOAD_BAT!" "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" "!VENV_PY!"
-if errorlevel 1 exit /b 1
+if "%USING_EXTERNAL_MODELS%"=="1" (
+  echo [STEP] External models mode enabled, skip download_model.
+) else (
+  echo [STEP] Downloading model assets for model=!MODEL_NAME! highvram=!HIGHVRAM!...
+  if "%HIGHVRAM%"=="1" (
+    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --highvram !DOWNLOAD_GGUF_ARG!
+  ) else (
+    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" !DOWNLOAD_GGUF_ARG!
+  )
+  if errorlevel 1 exit /b 1
+)
 
 echo [STEP] Preflight runtime import check...
 "!VENV_PY!" -c "import torch, kimodo, motion_correction; print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda))"

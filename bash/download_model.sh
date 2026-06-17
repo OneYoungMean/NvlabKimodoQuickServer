@@ -14,7 +14,11 @@ OUTPUT_MODE="console"
 LOG_PATH="${LOG_DIR}/download_model.log"
 UNLOCK_STALE=0
 FORCE_SYNC=0
-DOWNLOAD_GGUF="${KIMODO_DOWNLOAD_GGUF:-1}"
+# GGUF download decision is made internally by decide_download_gguf().
+# DOWNLOAD_GGUF stays "auto" until then; --download-gguf forces it (CPU run).
+DOWNLOAD_GGUF="auto"
+FORCE_GGUF=0
+VENV_PY=""
 MODEL_NAME="Kimodo-SOMA-RP-v1"
 HIGHVRAM=0
 
@@ -32,7 +36,8 @@ while [[ $# -gt 0 ]]; do
     --unlock-stale) UNLOCK_STALE=1; shift ;;
     --force) FORCE_SYNC=1; shift ;;
     --model) MODEL_NAME="$2"; shift 2 ;;
-    --download-gguf) DOWNLOAD_GGUF=1; shift ;;
+    --download-gguf) FORCE_GGUF=1; shift ;;
+    --venv) VENV_PY="$2"; shift 2 ;;
     --highvram) HIGHVRAM=1; shift ;;
     *) shift ;;
   esac
@@ -210,6 +215,36 @@ ensure_repo_any() {
   echo "[ERROR] Need one of: ${req_a} or ${req_b}"
   return 1
 }
+
+# Decide whether the GGUF text encoder must be downloaded.
+# Rule: explicit --download-gguf (CPU run) forces GGUF; otherwise probe total
+# VRAM via the venv python. <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
+decide_download_gguf() {
+  if [[ "${FORCE_GGUF}" == "1" ]]; then
+    echo "[INFO] --download-gguf forced -> GGUF download enabled."
+    DOWNLOAD_GGUF=1
+    return 0
+  fi
+  local vram="none"
+  if [[ -n "${VENV_PY}" && -x "${VENV_PY}" ]]; then
+    vram="$("${VENV_PY}" -c "import torch; print(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')" 2>/dev/null || echo none)"
+  fi
+  if [[ "${vram}" == "none" || -z "${vram}" ]]; then
+    echo "[INFO] No usable GPU detected -> GGUF download enabled."
+    DOWNLOAD_GGUF=1
+    return 0
+  fi
+  local decision="local"
+  decision="$("${VENV_PY}" -c "print('gguf' if float('${vram}')<6.0 else 'local')" 2>/dev/null || echo local)"
+  if [[ "${decision}" == "gguf" ]]; then
+    echo "[INFO] VRAM=${vram}GB (<6GB) -> GGUF download enabled."
+    DOWNLOAD_GGUF=1
+  else
+    echo "[INFO] VRAM=${vram}GB (>=6GB) -> local encoder."
+    DOWNLOAD_GGUF=0
+  fi
+  return 0
+}
 main() {
   mkdir -p "${LOG_DIR}" "${MODELS_DIR}" >/dev/null 2>&1 || true
   ensure_git_and_lfs || return 1
@@ -238,19 +273,19 @@ main() {
   ensure_repo_with_fallback "${model_repo_url}" "${model_repo_url_fallback}" \
     "${MODELS_DIR}/${MODEL_DIR_NAME}" "model.safetensors" "*" || return 1
 
-  if [[ "${HIGHVRAM}" == "1" ]]; then
+  decide_download_gguf
+
+  if [[ "${DOWNLOAD_GGUF}" == "1" ]]; then
+    echo "[STEP] GGUF mode enabled: downloading GGUF text encoder (skip local NF4/full encoder)"
+    ensure_repo_with_fallback "${GGUF_REPO_URL}" "${GGUF_REPO_URL_FALLBACK}" \
+      "${MODELS_DIR}/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF" ".gguf" "*" || return 1
+  elif [[ "${HIGHVRAM}" == "1" ]]; then
     echo "[STEP] highvram mode enabled: full text-encoder assets"
     ensure_repo "${META_LLAMA_REPO_URL}" "${MODELS_DIR}/Meta-Llama-3-8B-Instruct" "model.safetensors.index.json" "*" || return 1
     ensure_repo_any "${LLM2VEC_PEFT_REPO_URL}" "${MODELS_DIR}/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised" "adapter_model.safetensors" "model.safetensors" "*" || return 1
   else
     ensure_repo_with_fallback "${LLM2VEC_NF4_REPO_URL}" "${LLM2VEC_NF4_REPO_URL_FALLBACK}" \
       "${MODELS_DIR}/KIMODO-Meta3_llm2vec_NF4" "model.safetensors" "*" || return 1
-  fi
-
-  if [[ "${DOWNLOAD_GGUF}" == "1" ]]; then
-    echo "[STEP] CPU gguf mode enabled: downloading GGUF text encoder model"
-    ensure_repo_with_fallback "${GGUF_REPO_URL}" "${GGUF_REPO_URL_FALLBACK}" \
-      "${MODELS_DIR}/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF" ".gguf" "*" || return 1
   fi
 
   echo "[OK] download_model complete."

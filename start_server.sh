@@ -23,7 +23,6 @@ DOWNLOAD_SH="${BASH_DIR}/download_model.sh"
 RESOLVE_MODEL_ALIAS_SH="${BASH_DIR}/resolve_model_alias.sh"
 LAUNCH_BRIDGE_SH="${BASH_DIR}/launch_bridge.sh"
 RUN_SETUP_PHASE_SH="${BASH_DIR}/run_setup_phase.sh"
-RUN_DOWNLOAD_PHASE_SH="${BASH_DIR}/run_download_phase.sh"
 WATCHDOG_BRIDGE_SH="${BASH_DIR}/watchdog_bridge.sh"
 
 SETUP_SENTINEL="${ROOT_DIR}/.setup.complete"
@@ -46,7 +45,6 @@ CPU_TEXT_ENCODER="${KIMODO_CPU_TEXT_ENCODER:-gguf}"
 GGUF_MODEL_PATH="${KIMODO_GGUF_MODEL_PATH:-}"
 GGUF_CTX="${KIMODO_GGUF_CTX:-}"
 USE_CPU_GGUF=0
-DOWNLOAD_GGUF=0
 VENV_PATH_ARG=""
 VENV_PY=""
 USING_EXTERNAL_MODELS=0
@@ -109,7 +107,7 @@ else
   echo "[INFO] Using runtime models root: ${MODELS_ROOT}"
 fi
 
-for f in "${RESOLVE_MODEL_ALIAS_SH}" "${LAUNCH_BRIDGE_SH}" "${RUN_SETUP_PHASE_SH}" "${RUN_DOWNLOAD_PHASE_SH}" "${WATCHDOG_BRIDGE_SH}"; do
+for f in "${RESOLVE_MODEL_ALIAS_SH}" "${LAUNCH_BRIDGE_SH}" "${RUN_SETUP_PHASE_SH}" "${DOWNLOAD_SH}" "${WATCHDOG_BRIDGE_SH}"; do
   if [[ ! -f "${f}" ]]; then
     echo "[ERROR] Missing required script: ${f}"
     exit 1
@@ -171,21 +169,29 @@ fi
 bash "${RUN_SETUP_PHASE_SH}" "${ROOT_DIR}" "${OUTPUT_MODE}" "${USING_EXTERNAL_VENV}" \
   "${SETUP_SENTINEL}" "${SETUP_SH}" "${LOG_DIR}/${LOG_NAME_SETUP}" "${SETUP_DEVICE_MODE}" || exit 1
 
-# ---- download phase ---------------------------------------------------------
-if [[ -n "${RUN_DEVICE}" && "${RUN_DEVICE,,}" == "cpu" && "${CPU_TEXT_ENCODER,,}" == "gguf" ]]; then
-  USE_CPU_GGUF=1
-  DOWNLOAD_GGUF=1
-fi
-KIMODO_DOWNLOAD_GGUF="${DOWNLOAD_GGUF}" \
-  bash "${RUN_DOWNLOAD_PHASE_SH}" "${ROOT_DIR}" "${OUTPUT_MODE}" "${USING_EXTERNAL_MODELS}" \
-  "${HIGHVRAM}" "${MODEL_RUN_NAME}" "${MODEL_NAME}" "${DOWNLOAD_SH}" "${LOG_DIR}/${LOG_NAME_DOWNLOAD}" || exit 1
-
-# ---- preflight --------------------------------------------------------------
+# Resolve venv python before the download phase so download_model.sh can probe VRAM.
 [[ -z "${VENV_PY}" ]] && VENV_PY="${SOURCE_ROOT}/.venv/bin/python"
 if [[ ! -x "${VENV_PY}" ]]; then
   echo "[ERROR] Missing venv python: ${VENV_PY}"
   exit 1
 fi
+
+# ---- download phase ---------------------------------------------------------
+if [[ -n "${RUN_DEVICE}" && "${RUN_DEVICE,,}" == "cpu" && "${CPU_TEXT_ENCODER,,}" == "gguf" ]]; then
+  USE_CPU_GGUF=1
+fi
+if [[ "${USING_EXTERNAL_MODELS}" == "1" ]]; then
+  echo "[STEP] External models mode enabled, skip download_model."
+else
+  echo "[STEP] Downloading model assets for model=${MODEL_NAME} highvram=${HIGHVRAM}..."
+  dl_args=(--output "${OUTPUT_MODE}" --log "${LOG_DIR}/${LOG_NAME_DOWNLOAD}"
+    --unlock-stale --model "${MODEL_RUN_NAME}" --venv "${VENV_PY}")
+  [[ "${HIGHVRAM}" == "1" ]] && dl_args+=(--highvram)
+  [[ "${USE_CPU_GGUF}" == "1" ]] && dl_args+=(--download-gguf)
+  bash "${DOWNLOAD_SH}" "${dl_args[@]}" || exit 1
+fi
+
+# ---- preflight --------------------------------------------------------------
 echo "[STEP] Preflight runtime import check..."
 if ! "${VENV_PY}" -c "import torch, kimodo, motion_correction; print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda))"; then
   echo "[ERROR] Runtime preflight failed: cannot import torch/kimodo/motion_correction."

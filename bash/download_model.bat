@@ -11,8 +11,11 @@ set "OUTPUT_MODE=console"
 set "LOG_PATH=%LOG_DIR%\download_model.log"
 set "UNLOCK_STALE=0"
 set "FORCE_SYNC=0"
-set "DOWNLOAD_GGUF=%KIMODO_DOWNLOAD_GGUF%"
-if not defined DOWNLOAD_GGUF set "DOWNLOAD_GGUF=1"
+REM GGUF download decision is made internally by :decide_download_gguf.
+REM DOWNLOAD_GGUF stays "auto" until then; --download-gguf forces it (CPU run).
+set "DOWNLOAD_GGUF=auto"
+set "FORCE_GGUF=0"
+set "VENV_PY="
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
 set "MODEL_DIR_NAME="
@@ -65,7 +68,13 @@ if /I "%~1"=="--model" (
   goto parse_args
 )
 if /I "%~1"=="--download-gguf" (
-  set "DOWNLOAD_GGUF=1"
+  set "FORCE_GGUF=1"
+  shift
+  goto parse_args
+)
+if /I "%~1"=="--venv" (
+  set "VENV_PY=%~2"
+  shift
   shift
   goto parse_args
 )
@@ -115,6 +124,8 @@ if /I "%MODEL_REPO_NAME%"=="Kimodo-G1-SEED-v1" set "MODEL_REPO_URL_FALLBACK=http
 call :ensure_repo_with_fallback "%MODEL_REPO_URL%" "%MODEL_REPO_URL_FALLBACK%" "%MODELS_DIR%\%MODEL_DIR_NAME%" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 
+call :decide_download_gguf
+
 if /I "%DOWNLOAD_GGUF%"=="1" (
   echo [STEP] GGUF mode enabled: downloading GGUF text encoder ^(skip local NF4/full encoder^)
   call :ensure_repo_with_fallback "%GGUF_REPO_URL%" "%GGUF_REPO_URL_FALLBACK%" "%MODELS_DIR%\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF" ".gguf" "*" || exit /b 1
@@ -127,6 +138,35 @@ if /I "%DOWNLOAD_GGUF%"=="1" (
 )
 
 echo [OK] download_model complete.
+exit /b 0
+
+:decide_download_gguf
+:: Decide whether the GGUF text encoder must be downloaded.
+:: Rule: explicit --download-gguf (CPU run) forces GGUF; otherwise probe total
+:: VRAM via the venv python. <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
+if "%FORCE_GGUF%"=="1" (
+  echo [INFO] --download-gguf forced -^> GGUF download enabled.
+  set "DOWNLOAD_GGUF=1"
+  exit /b 0
+)
+set "VRAM_TOTAL_GB=none"
+if defined VENV_PY if exist "!VENV_PY!" (
+  for /f "usebackq delims=" %%V in (`"!VENV_PY!" -c "import torch; print(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')" 2^>nul`) do set "VRAM_TOTAL_GB=%%V"
+)
+if /I "!VRAM_TOTAL_GB!"=="none" (
+  echo [INFO] No usable GPU detected -^> GGUF download enabled.
+  set "DOWNLOAD_GGUF=1"
+  exit /b 0
+)
+set "VRAM_DECISION=local"
+for /f "usebackq delims=" %%R in (`"!VENV_PY!" -c "print('gguf' if float('!VRAM_TOTAL_GB!')<6.0 else 'local')" 2^>nul`) do set "VRAM_DECISION=%%R"
+if /I "!VRAM_DECISION!"=="gguf" (
+  echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^<6GB^) -^> GGUF download enabled.
+  set "DOWNLOAD_GGUF=1"
+) else (
+  echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^>=6GB^) -^> local encoder.
+  set "DOWNLOAD_GGUF=0"
+)
 exit /b 0
 
 :ensure_git_and_lfs
