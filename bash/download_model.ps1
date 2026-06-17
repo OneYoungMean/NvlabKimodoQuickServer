@@ -694,7 +694,6 @@ if ($script:OutputMode -ieq "file") {
   if ($logParent) {
     New-Item -ItemType Directory -Force -Path $logParent | Out-Null
   }
-  Set-Content -LiteralPath $script:LogPath -Value $null -Encoding UTF8
   try {
     exit (Invoke-Main)
   } catch {
