@@ -1,3 +1,8 @@
+param(
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$CliArgs
+)
+
 $ErrorActionPreference = "Stop"
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -32,20 +37,26 @@ $script:Llm2VecPeftRepoUrl = if ($env:KIMODO_LLM2VEC_PEFT_REPO_URL) { $env:KIMOD
 
 function Write-Line {
   param([string]$Message)
-  Write-Output $Message
+  if ($script:OutputMode -ieq "file") {
+    Add-Content -LiteralPath $script:LogPath -Value $Message -Encoding UTF8
+    return
+  }
+  Write-Host $Message
 }
 
 function Parse-Args {
-  for ($i = 0; $i -lt $args.Count; $i++) {
-    switch -Regex ($args[$i]) {
-      "^--output$" { $i++; $script:OutputMode = $args[$i]; continue }
-      "^--log$" { $i++; $script:LogPath = $args[$i]; continue }
+  param([string[]]$InputArgs)
+
+  for ($i = 0; $i -lt $InputArgs.Count; $i++) {
+    switch -Regex ($InputArgs[$i]) {
+      "^--output$" { $i++; $script:OutputMode = $InputArgs[$i]; continue }
+      "^--log$" { $i++; $script:LogPath = $InputArgs[$i]; continue }
       "^--unlock-stale$" { $script:UnlockStale = $true; continue }
       "^--force$" { $script:ForceSync = $true; continue }
-      "^--model$" { $i++; $script:ModelName = $args[$i]; continue }
-      "^--device$" { $i++; $script:RunDevice = $args[$i]; continue }
-      "^--cpu-text-encoder$" { $i++; $script:CpuTextEncoder = $args[$i]; continue }
-      "^--venv$" { $i++; $script:VenvPy = $args[$i]; continue }
+      "^--model$" { $i++; $script:ModelName = $InputArgs[$i]; continue }
+      "^--device$" { $i++; $script:RunDevice = $InputArgs[$i]; continue }
+      "^--cpu-text-encoder$" { $i++; $script:CpuTextEncoder = $InputArgs[$i]; continue }
+      "^--venv$" { $i++; $script:VenvPy = $InputArgs[$i]; continue }
       "^--highvram$" { $script:HighVram = $true; continue }
       default { continue }
     }
@@ -635,13 +646,20 @@ function Invoke-Main {
   return 0
 }
 
-Parse-Args
+Parse-Args $CliArgs
 
 if ($script:OutputMode -ieq "file") {
-  $script:MainExitCode = 1
-  & { $script:MainExitCode = Invoke-Main } *>&1 | Out-File -LiteralPath $script:LogPath -Encoding UTF8
-  Write-Line "[INFO] download_model log: $script:LogPath"
-  exit $script:MainExitCode
+  $logParent = Split-Path -Parent $script:LogPath
+  if ($logParent) {
+    New-Item -ItemType Directory -Force -Path $logParent | Out-Null
+  }
+  Set-Content -LiteralPath $script:LogPath -Value $null -Encoding UTF8
+  try {
+    exit (Invoke-Main)
+  } catch {
+    Add-Content -LiteralPath $script:LogPath -Value ("[ERROR] " + $_.Exception.Message) -Encoding UTF8
+    exit 1
+  }
 }
 
 exit (Invoke-Main)
