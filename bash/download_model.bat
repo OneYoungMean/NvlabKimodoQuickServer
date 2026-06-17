@@ -31,6 +31,11 @@ set "GGUF_REPO_URL_FALLBACK=https://huggingface.co/Aero-Ex/Meta-Llama-3.1-8B-Ins
 set "META_LLAMA_REPO_URL=https://www.modelscope.cn/models/LLM-Research/Meta-Llama-3-8B-Instruct"
 set "LLM2VEC_PEFT_REPO_URL=https://www.modelscope.cn/models/oneyoungmean/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
 set "INJECT_ONCE=0"
+set "GGUF_DECISION_REASON=unset"
+set "VRAM_PROBE_AVAILABLE=unknown"
+set "VRAM_PROBE_DEVICE_COUNT=unknown"
+set "VRAM_PROBE_TORCH_CUDA=unknown"
+set "VRAM_PROBE_STATUS=unknown"
 
 if defined KIMODO_LLM2VEC_NF4_REPO_URL set "LLM2VEC_NF4_REPO_URL=%KIMODO_LLM2VEC_NF4_REPO_URL%"
 if defined KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK set "LLM2VEC_NF4_REPO_URL_FALLBACK=%KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK%"
@@ -110,6 +115,10 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 if not exist "%MODELS_DIR%" mkdir "%MODELS_DIR%" >nul 2>nul
 
 if defined KIMODO_TEST_SCENARIO_NAME echo [TEST] scenario=%KIMODO_TEST_SCENARIO_NAME%
+echo [DEBUG] context: root=%ROOT_DIR% models=%MODELS_DIR% output=%OUTPUT_MODE% log=%LOG_PATH%
+echo [DEBUG] args: model=%MODEL_NAME% device=%RUN_DEVICE% cpu_text_encoder=%CPU_TEXT_ENCODER% highvram=%HIGHVRAM% force_sync=%FORCE_SYNC% unlock_stale=%UNLOCK_STALE%
+echo [DEBUG] venv: %VENV_PY%
+echo [DEBUG] env hints: KIMODO_CPU_TEXT_ENCODER=%KIMODO_CPU_TEXT_ENCODER% KIMODO_FORCE_GGUF=%KIMODO_FORCE_GGUF%
 
 call :ensure_git_and_lfs || exit /b 1
 
@@ -124,16 +133,19 @@ set "MODEL_NAME=%MODEL_NAME%"
 set "MODEL_DIR_NAME=%MODEL_DIR_NAME%"
 set "MODEL_REPO_URL=https://www.modelscope.cn/nv-community/%MODEL_REPO_NAME%.git"
 set "MODEL_REPO_URL_FALLBACK="
+echo [DEBUG] alias resolved: name=%MODEL_NAME% dir=%MODEL_DIR_NAME% repo=%MODEL_REPO_NAME%
 if /I "%MODEL_REPO_NAME%"=="Kimodo-SOMA-RP-v1.1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.1"
 if /I "%MODEL_REPO_NAME%"=="Kimodo-SMPLX-RP-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SMPLX-RP-v1"
 if /I "%MODEL_REPO_NAME%"=="Kimodo-G1-RP-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-G1-RP-v1"
 if /I "%MODEL_REPO_NAME%"=="Kimodo-SOMA-SEED-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SOMA-SEED-v1"
 if /I "%MODEL_REPO_NAME%"=="Kimodo-SOMA-SEED-v1.1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-SOMA-SEED-v1.1"
 if /I "%MODEL_REPO_NAME%"=="Kimodo-G1-SEED-v1" set "MODEL_REPO_URL_FALLBACK=https://huggingface.co/nvidia/Kimodo-G1-SEED-v1"
+echo [DEBUG] model repo urls: primary=%MODEL_REPO_URL% fallback=%MODEL_REPO_URL_FALLBACK%
 call :ensure_repo_with_fallback "%MODEL_REPO_URL%" "%MODEL_REPO_URL_FALLBACK%" "%MODELS_DIR%\%MODEL_DIR_NAME%" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 
 call :decide_download_gguf
+echo [DEBUG] GGUF decision: DOWNLOAD_GGUF=%DOWNLOAD_GGUF% reason=%GGUF_DECISION_REASON% vram_total=%VRAM_TOTAL_GB% probe_status=%VRAM_PROBE_STATUS%
 
 if /I "%DOWNLOAD_GGUF%"=="1" (
   echo [STEP] GGUF mode enabled: downloading GGUF text encoder ^(skip local NF4/full encoder^)
@@ -154,17 +166,44 @@ exit /b 0
 :: Rule: an explicit CPU run (--device cpu with cpu text encoder = gguf) forces
 :: GGUF regardless of VRAM; otherwise probe total VRAM via the venv python.
 :: <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
+set "GGUF_DECISION_REASON=probing"
+echo [DEBUG] decide_download_gguf: run_device=%RUN_DEVICE% cpu_text_encoder=%CPU_TEXT_ENCODER% venv=%VENV_PY%
 if defined RUN_DEVICE if /I "%RUN_DEVICE%"=="cpu" if /I "%CPU_TEXT_ENCODER%"=="gguf" (
   echo [INFO] Explicit CPU run ^(cpu text encoder=gguf^) -^> GGUF download enabled.
+  set "GGUF_DECISION_REASON=forced_cpu"
   set "DOWNLOAD_GGUF=1"
   exit /b 0
 )
 set "VRAM_TOTAL_GB=none"
-if defined VENV_PY if exist "!VENV_PY!" (
-  for /f "usebackq delims=" %%V in (`"!VENV_PY!" -c "import torch; print(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')" 2^>nul`) do set "VRAM_TOTAL_GB=%%V"
+if defined VENV_PY (
+  if exist "!VENV_PY!" (
+    set "VRAM_PROBE_STATUS=running"
+    echo [DEBUG] VRAM probe python: !VENV_PY!
+    set "VRAM_PROBE_LOG=%TEMP%\kimodo_vram_probe_%RANDOM%%RANDOM%.log"
+    (
+      "!VENV_PY!" -c "import torch; print('probe_total=' + (str(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2)) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')); print('available=' + str(torch.cuda.is_available())); print('device_count=' + str(torch.cuda.device_count())); print('torch_cuda=' + str(torch.version.cuda))"
+    ) > "!VRAM_PROBE_LOG!" 2>&1
+    set "VRAM_PROBE_RC=%ERRORLEVEL%"
+    for /f "usebackq delims=" %%L in ("!VRAM_PROBE_LOG!") do (
+      echo [DEBUG] VRAM probe output: %%L
+      echo %%L | findstr /B /I "probe_total=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_TOTAL_GB=%%B"
+      echo %%L | findstr /B /I "available=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_AVAILABLE=%%B"
+      echo %%L | findstr /B /I "device_count=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_DEVICE_COUNT=%%B"
+      echo %%L | findstr /B /I "torch_cuda=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_TORCH_CUDA=%%B"
+    )
+    del "!VRAM_PROBE_LOG!" >nul 2>nul
+    echo [DEBUG] VRAM probe rc=!VRAM_PROBE_RC! available=!VRAM_PROBE_AVAILABLE! device_count=!VRAM_PROBE_DEVICE_COUNT! torch_cuda=!VRAM_PROBE_TORCH_CUDA! total=!VRAM_TOTAL_GB!
+  ) else (
+    echo [WARN] VRAM probe skipped: venv python not found: !VENV_PY!
+    set "VRAM_PROBE_STATUS=missing_python"
+  )
+) else (
+  echo [WARN] VRAM probe skipped: VENV_PY is not set.
+  set "VRAM_PROBE_STATUS=missing_python"
 )
 if /I "!VRAM_TOTAL_GB!"=="none" (
   echo [INFO] No usable GPU detected -^> GGUF download enabled.
+  set "GGUF_DECISION_REASON=no_gpu"
   set "DOWNLOAD_GGUF=1"
   exit /b 0
 )
@@ -172,9 +211,11 @@ set "VRAM_DECISION=local"
 for /f "usebackq delims=" %%R in (`"!VENV_PY!" -c "print('gguf' if float('!VRAM_TOTAL_GB!')<6.0 else 'local')" 2^>nul`) do set "VRAM_DECISION=%%R"
 if /I "!VRAM_DECISION!"=="gguf" (
   echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^<6GB^) -^> GGUF download enabled.
+  set "GGUF_DECISION_REASON=vram_lt_6g"
   set "DOWNLOAD_GGUF=1"
 ) else (
   echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^>=6GB^) -^> local encoder.
+  set "GGUF_DECISION_REASON=vram_ge_6g"
   set "DOWNLOAD_GGUF=0"
 )
 exit /b 0
