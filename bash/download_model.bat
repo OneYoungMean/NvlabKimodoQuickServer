@@ -164,7 +164,8 @@ exit /b 0
 :decide_download_gguf
 :: Decide whether the GGUF text encoder must be downloaded.
 :: Rule: an explicit CPU run (--device cpu with cpu text encoder = gguf) forces
-:: GGUF regardless of VRAM; otherwise probe total VRAM via the venv python.
+:: GGUF regardless of VRAM; otherwise probe total VRAM via nvidia-smi first and
+:: fall back to the venv python torch probe when needed.
 :: <6GB or no usable GPU -> GGUF; >=6GB -> local encoder.
 set "GGUF_DECISION_REASON=probing"
 echo [DEBUG] decide_download_gguf: run_device=%RUN_DEVICE% cpu_text_encoder=%CPU_TEXT_ENCODER% venv=%VENV_PY%
@@ -175,31 +176,68 @@ if defined RUN_DEVICE if /I "%RUN_DEVICE%"=="cpu" if /I "%CPU_TEXT_ENCODER%"=="g
   exit /b 0
 )
 set "VRAM_TOTAL_GB=none"
-if defined VENV_PY (
-  if exist "!VENV_PY!" (
-    set "VRAM_PROBE_STATUS=running"
-    echo [DEBUG] VRAM probe python: !VENV_PY!
-    set "VRAM_PROBE_LOG=%TEMP%\kimodo_vram_probe_%RANDOM%%RANDOM%.log"
-    (
-      "!VENV_PY!" -c "import torch; print('probe_total=' + (str(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2)) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')); print('available=' + str(torch.cuda.is_available())); print('device_count=' + str(torch.cuda.device_count())); print('torch_cuda=' + str(torch.version.cuda))"
-    ) > "!VRAM_PROBE_LOG!" 2>&1
-    set "VRAM_PROBE_RC=%ERRORLEVEL%"
-    for /f "usebackq delims=" %%L in ("!VRAM_PROBE_LOG!") do (
-      echo [DEBUG] VRAM probe output: %%L
-      echo %%L | findstr /B /I "probe_total=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_TOTAL_GB=%%B"
-      echo %%L | findstr /B /I "available=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_AVAILABLE=%%B"
-      echo %%L | findstr /B /I "device_count=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_DEVICE_COUNT=%%B"
-      echo %%L | findstr /B /I "torch_cuda=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_TORCH_CUDA=%%B"
+set "VRAM_TOTAL_MB_MAX="
+set "VRAM_TOTAL_GB_FROM_SMI="
+set "VRAM_PROBE_BACKEND=none"
+set "NVIDIA_SMI_EXE="
+for /f "delims=" %%S in ('where nvidia-smi 2^>nul') do (
+  if not defined NVIDIA_SMI_EXE set "NVIDIA_SMI_EXE=%%S"
+)
+if defined NVIDIA_SMI_EXE (
+  set "VRAM_PROBE_STATUS=nvidia-smi"
+  echo [DEBUG] VRAM probe backend: nvidia-smi ^(!NVIDIA_SMI_EXE!^)
+  for /f "usebackq tokens=1 delims=," %%V in (`"!NVIDIA_SMI_EXE!" --query-gpu=memory.total --format=csv,noheader,nounits 2^>nul`) do (
+    set "VRAM_TOTAL_MB_CUR="
+    for /f "tokens=* delims= " %%T in ("%%V") do set "VRAM_TOTAL_MB_CUR=%%T"
+    if defined VRAM_TOTAL_MB_CUR (
+      if not defined VRAM_TOTAL_MB_MAX (
+        set "VRAM_TOTAL_MB_MAX=!VRAM_TOTAL_MB_CUR!"
+      ) else (
+        if !VRAM_TOTAL_MB_CUR! GTR !VRAM_TOTAL_MB_MAX! set "VRAM_TOTAL_MB_MAX=!VRAM_TOTAL_MB_CUR!"
+      )
     )
-    del "!VRAM_PROBE_LOG!" >nul 2>nul
-    echo [DEBUG] VRAM probe rc=!VRAM_PROBE_RC! available=!VRAM_PROBE_AVAILABLE! device_count=!VRAM_PROBE_DEVICE_COUNT! torch_cuda=!VRAM_PROBE_TORCH_CUDA! total=!VRAM_TOTAL_GB!
+  )
+  if defined VRAM_TOTAL_MB_MAX (
+    set "VRAM_TOTAL_GB_FROM_SMI=!VRAM_TOTAL_MB_MAX!"
+    for /f "usebackq delims=" %%R in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$v=[double]('!VRAM_TOTAL_MB_MAX!'.Trim()); [math]::Round($v/1024,2)" 2^>nul`) do (
+      set "VRAM_TOTAL_GB=%%R"
+    )
+    if /I not "!VRAM_TOTAL_GB!"=="none" (
+      set "VRAM_PROBE_BACKEND=nvidia-smi"
+      echo [DEBUG] VRAM probe result: max_total=!VRAM_TOTAL_GB!GB from nvidia-smi
+    )
   ) else (
-    echo [WARN] VRAM probe skipped: venv python not found: !VENV_PY!
+    echo [WARN] VRAM probe via nvidia-smi returned no rows.
+  )
+)
+if /I "!VRAM_TOTAL_GB!"=="none" (
+  if defined VENV_PY (
+    if exist "!VENV_PY!" (
+      set "VRAM_PROBE_STATUS=torch"
+      echo [DEBUG] VRAM probe fallback python: !VENV_PY!
+      set "VRAM_PROBE_LOG=%TEMP%\kimodo_vram_probe_%RANDOM%%RANDOM%.log"
+      (
+        "!VENV_PY!" -c "import torch; print('probe_total=' + (str(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2)) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')); print('available=' + str(torch.cuda.is_available())); print('device_count=' + str(torch.cuda.device_count())); print('torch_cuda=' + str(torch.version.cuda))"
+      ) > "!VRAM_PROBE_LOG!" 2>&1
+      set "VRAM_PROBE_RC=%ERRORLEVEL%"
+      for /f "usebackq delims=" %%L in ("!VRAM_PROBE_LOG!") do (
+        echo [DEBUG] VRAM probe output: %%L
+        echo %%L | findstr /B /I "probe_total=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_TOTAL_GB=%%B"
+        echo %%L | findstr /B /I "available=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_AVAILABLE=%%B"
+        echo %%L | findstr /B /I "device_count=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_DEVICE_COUNT=%%B"
+        echo %%L | findstr /B /I "torch_cuda=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_TORCH_CUDA=%%B"
+      )
+      del "!VRAM_PROBE_LOG!" >nul 2>nul
+      echo [DEBUG] VRAM probe rc=!VRAM_PROBE_RC! available=!VRAM_PROBE_AVAILABLE! device_count=!VRAM_PROBE_DEVICE_COUNT! torch_cuda=!VRAM_PROBE_TORCH_CUDA! total=!VRAM_TOTAL_GB!
+      if /I not "!VRAM_TOTAL_GB!"=="none" set "VRAM_PROBE_BACKEND=torch"
+    ) else (
+      echo [WARN] VRAM probe skipped: venv python not found: !VENV_PY!
+      set "VRAM_PROBE_STATUS=missing_python"
+    )
+  ) else (
+    echo [WARN] VRAM probe skipped: VENV_PY is not set.
     set "VRAM_PROBE_STATUS=missing_python"
   )
-) else (
-  echo [WARN] VRAM probe skipped: VENV_PY is not set.
-  set "VRAM_PROBE_STATUS=missing_python"
 )
 if /I "!VRAM_TOTAL_GB!"=="none" (
   echo [INFO] No usable GPU detected -^> GGUF download enabled.
@@ -208,21 +246,29 @@ if /I "!VRAM_TOTAL_GB!"=="none" (
   exit /b 0
 )
 set "VRAM_DECISION=local"
-for /f "usebackq delims=" %%R in (`"!VENV_PY!" -c "print('gguf' if float('!VRAM_TOTAL_GB!')<6.0 else 'local')" 2^>nul`) do set "VRAM_DECISION=%%R"
+for /f "usebackq delims=" %%R in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "if([double]('!VRAM_TOTAL_GB!') -lt 6.0){'gguf'} else {'local'}" 2^>nul`) do set "VRAM_DECISION=%%R"
 if /I "!VRAM_DECISION!"=="gguf" (
-  echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^<6GB^) -^> GGUF download enabled.
+  echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^<6GB, backend=!VRAM_PROBE_BACKEND!^) -^> GGUF download enabled.
   set "GGUF_DECISION_REASON=vram_lt_6g"
   set "DOWNLOAD_GGUF=1"
 ) else (
-  echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^>=6GB^) -^> local encoder.
+  echo [INFO] VRAM=!VRAM_TOTAL_GB!GB ^(^>=6GB, backend=!VRAM_PROBE_BACKEND!^) -^> local encoder.
   set "GGUF_DECISION_REASON=vram_ge_6g"
   set "DOWNLOAD_GGUF=0"
 )
 exit /b 0
 
 :ensure_git_and_lfs
-call :ensure_git || exit /b 1
-call :ensure_git_lfs || exit /b 1
+call :ensure_git
+if errorlevel 1 (
+  echo [WARN] git unavailable, will rely on direct download fallback when possible.
+  exit /b 0
+)
+call :ensure_git_lfs
+if errorlevel 1 (
+  echo [WARN] git-lfs unavailable, git-based sync may fail and fall back to direct download.
+  exit /b 0
+)
 exit /b 0
 
 :ensure_repo_any
@@ -247,11 +293,17 @@ set "FALLBACK_REQ_FILE=%~4"
 set "FALLBACK_LFS_INCLUDE=%~5"
 call :ensure_repo "%PRIMARY_REPO_URL%" "%FALLBACK_DEST_DIR%" "%FALLBACK_REQ_FILE%" "%FALLBACK_LFS_INCLUDE%"
 if not errorlevel 1 exit /b 0
-if not defined FALLBACK_REPO_URL exit /b 1
-echo [WARN] Primary repo failed, fallback to: %FALLBACK_REPO_URL%
-call :ensure_repo "%FALLBACK_REPO_URL%" "%FALLBACK_DEST_DIR%" "%FALLBACK_REQ_FILE%" "%FALLBACK_LFS_INCLUDE%"
+if defined FALLBACK_REPO_URL (
+  echo [WARN] Primary repo failed, fallback to: %FALLBACK_REPO_URL%
+  call :ensure_repo "%FALLBACK_REPO_URL%" "%FALLBACK_DEST_DIR%" "%FALLBACK_REQ_FILE%" "%FALLBACK_LFS_INCLUDE%"
+  if not errorlevel 1 (
+    echo [OK] Fallback repo succeeded: %FALLBACK_REPO_URL%
+    exit /b 0
+  )
+)
+echo [WARN] Git-based sync failed, trying direct file download fallback: %FALLBACK_DEST_DIR%
+call :ensure_repo_snapshot_with_fallback "%PRIMARY_REPO_URL%" "%FALLBACK_REPO_URL%" "%FALLBACK_DEST_DIR%" "%FALLBACK_REQ_FILE%" "%FALLBACK_LFS_INCLUDE%"
 if errorlevel 1 exit /b 1
-echo [OK] Fallback repo succeeded: %FALLBACK_REPO_URL%
 exit /b 0
 
 :ensure_git
@@ -380,6 +432,81 @@ if errorlevel 1 exit /b 1
 call :inject_missing_after_download "!DEST_DIR!" "%REQ_FILE%"
 exit /b 0
 
+:ensure_repo_snapshot_with_fallback
+set "SNAP_PRIMARY_URL=%~1"
+set "SNAP_FALLBACK_URL=%~2"
+set "SNAP_DEST_DIR=%~3"
+set "SNAP_REQ_FILE=%~4"
+set "SNAP_LFS_INCLUDE=%~5"
+call :ensure_repo_snapshot "%SNAP_PRIMARY_URL%" "%SNAP_DEST_DIR%" "%SNAP_REQ_FILE%" "%SNAP_LFS_INCLUDE%"
+if not errorlevel 1 exit /b 0
+if not defined SNAP_FALLBACK_URL exit /b 1
+call :ensure_repo_snapshot "%SNAP_FALLBACK_URL%" "%SNAP_DEST_DIR%" "%SNAP_REQ_FILE%" "%SNAP_LFS_INCLUDE%"
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:ensure_repo_snapshot
+set "SNAP_REPO_URL=%~1"
+set "SNAP_DEST_DIR=%~2"
+set "SNAP_REQ_FILE=%~3"
+set "SNAP_LFS_INCLUDE=%~4"
+set "SNAP_REPO_ID="
+set "SNAP_ENDPOINT="
+set "SNAP_ALLOW_PATTERNS="
+if not defined SNAP_LFS_INCLUDE set "SNAP_LFS_INCLUDE=%SNAP_REQ_FILE%"
+call :normalize_repo_url "%SNAP_REPO_URL%"
+set "SNAP_REPO_URL=%NORMALIZED_REPO_URL%"
+call :snapshot_source_from_url "%SNAP_REPO_URL%"
+if errorlevel 1 exit /b 1
+if not defined VENV_PY (
+  echo [ERROR] Snapshot fallback requires VENV_PY but it is not set.
+  exit /b 1
+)
+if not exist "!VENV_PY!" (
+  echo [ERROR] Snapshot fallback requires venv python, not found: !VENV_PY!
+  exit /b 1
+)
+if exist "!SNAP_DEST_DIR!" (
+  if not exist "!SNAP_DEST_DIR!\.git" (
+    call :backup_dir "!SNAP_DEST_DIR!" || exit /b 1
+  )
+)
+if /I "!SNAP_REQ_FILE!"==".gguf" (
+  set "SNAP_ALLOW_PATTERNS=*.gguf"
+) else (
+  set "SNAP_ALLOW_PATTERNS=!SNAP_LFS_INCLUDE!"
+  if not defined SNAP_ALLOW_PATTERNS set "SNAP_ALLOW_PATTERNS=*"
+)
+echo [STEP] Snapshot fallback download !SNAP_REPO_ID! -^> !SNAP_DEST_DIR!
+set "SNAPSHOT_LOG=%TEMP%\kimodo_snapshot_%RANDOM%%RANDOM%.log"
+(
+  "!VENV_PY!" -c "from huggingface_hub import snapshot_download; raw=r'!SNAP_ALLOW_PATTERNS!'; pats=None if (not raw or raw=='*') else [p.strip() for p in raw.split(',') if p.strip()]; snapshot_download(repo_id=r'!SNAP_REPO_ID!', local_dir=r'!SNAP_DEST_DIR!', allow_patterns=pats, endpoint=(r'!SNAP_ENDPOINT!' if r'!SNAP_ENDPOINT!' else None), max_workers=4)"
+) > "!SNAPSHOT_LOG!" 2>&1
+set "SNAPSHOT_RC=%ERRORLEVEL%"
+for /f "usebackq delims=" %%L in ("!SNAPSHOT_LOG!") do echo [DEBUG] snapshot fallback: %%L
+del "!SNAPSHOT_LOG!" >nul 2>nul
+if not "!SNAPSHOT_RC!"=="0" (
+  echo [WARN] Snapshot fallback failed: repo=!SNAP_REPO_ID! endpoint=!SNAP_ENDPOINT!
+  exit /b 1
+)
+if /I "!SNAP_REQ_FILE!"==".gguf" (
+  call :ensure_gguf_presence "!SNAP_DEST_DIR!"
+  if errorlevel 1 (
+    echo [ERROR] Missing .gguf files after snapshot fallback: !SNAP_DEST_DIR!
+    exit /b 1
+  )
+) else (
+  if not exist "!SNAP_DEST_DIR!\!SNAP_REQ_FILE!" (
+    echo [ERROR] Missing !SNAP_REQ_FILE! after snapshot fallback: !SNAP_DEST_DIR!
+    exit /b 1
+  )
+)
+call :validate_repo_safetensors "!SNAP_DEST_DIR!" "!SNAP_REQ_FILE!" "!SNAP_LFS_INCLUDE!"
+if errorlevel 1 exit /b 1
+call :inject_missing_after_download "!SNAP_DEST_DIR!" "!SNAP_REQ_FILE!"
+echo [OK] Snapshot fallback succeeded: !SNAP_REPO_ID!
+exit /b 0
+
 :ensure_gguf_presence
 set "GGUF_DIR=%~1"
 set "GGUF_FILE="
@@ -421,6 +548,19 @@ if /I "%RAW_URL:~0,24%"=="https://huggingface.co/" (
 )
 
 exit /b 0
+
+:snapshot_source_from_url
+set "SNAPSHOT_SOURCE_URL=%~1"
+set "SNAP_REPO_ID="
+set "SNAP_ENDPOINT="
+set "SNAP_URL_NO_GIT=%SNAPSHOT_SOURCE_URL:.git=%"
+if /I "!SNAP_URL_NO_GIT:~0,24!"=="https://huggingface.co/" (
+  set "SNAP_REPO_ID=!SNAP_URL_NO_GIT:~24!"
+  set "SNAP_ENDPOINT="
+  exit /b 0
+)
+echo [WARN] Snapshot fallback currently supports Hugging Face URLs only: !SNAPSHOT_SOURCE_URL!
+exit /b 1
 
 :prepare_repo
 set "REPO_DIR=%~1"
