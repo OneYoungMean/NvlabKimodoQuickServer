@@ -98,11 +98,16 @@ ensure_uv() {
 # git + git-lfs come from the system. We check and give an install hint.
 ensure_git_lfs() {
   if ! command -v git >/dev/null 2>&1; then
-    echo "[ERROR] git not found on PATH. Install it (e.g. apt-get install git)."
+    echo "[ERROR] git not found on PATH."
+    echo "[HINT] Install git first, e.g.:"
+    echo "       sudo apt-get update && sudo apt-get install -y git"
     return 1
   fi
   if ! command -v git-lfs >/dev/null 2>&1 && ! git lfs version >/dev/null 2>&1; then
-    echo "[ERROR] git-lfs not found. Install it (e.g. apt-get install git-lfs)."
+    echo "[ERROR] git-lfs not found on PATH."
+    echo "[HINT] Install git-lfs first, e.g.:"
+    echo "       sudo apt-get update && sudo apt-get install -y git-lfs"
+    echo "       git lfs install"
     return 1
   fi
   git lfs install --skip-repo >/dev/null 2>&1 || true

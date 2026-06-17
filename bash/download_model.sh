@@ -45,10 +45,15 @@ done
 ensure_git_and_lfs() {
   if ! command -v git >/dev/null 2>&1; then
     echo "[ERROR] git not found on PATH."
+    echo "[HINT] Install git first, e.g.:"
+    echo "       sudo apt-get update && sudo apt-get install -y git"
     return 1
   fi
   if ! git lfs version >/dev/null 2>&1; then
     echo "[ERROR] git-lfs not found on PATH."
+    echo "[HINT] Install git-lfs first, e.g.:"
+    echo "       sudo apt-get update && sudo apt-get install -y git-lfs"
+    echo "       git lfs install"
     return 1
   fi
   git lfs install --skip-repo >/dev/null 2>&1 || {
@@ -104,10 +109,14 @@ rotate_lock() {
 ensure_gguf_presence() {
   local dir="$1"
   [[ -d "${dir}" ]] || return 1
-  if find "${dir}" -type f -name '*.gguf' 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  return 1
+  local gguf_file
+  gguf_file="$(find "${dir}" -type f -name '*.gguf' 2>/dev/null | head -n 1)"
+  [[ -z "${gguf_file}" ]] && return 1
+  # A valid gguf file must be larger than 1KiB (pointer files are ~100 bytes).
+  local size
+  size="$(stat -c %s "${gguf_file}" 2>/dev/null || echo 0)"
+  [[ "${size}" -le 1024 ]] && return 1
+  return 0
 }
 
 prepare_repo() {
