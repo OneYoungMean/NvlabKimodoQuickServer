@@ -15,6 +15,7 @@ $script:VenvPy = ""
 $script:ModelName = "Kimodo-SOMA-RP-v1"
 $script:OutputMode = "console"
 $script:LogPath = Join-Path $script:LogDir "download_model.log"
+$script:QuickServerVersion = if ($env:KIMODO_QUICKSERVER_VERSION) { $env:KIMODO_QUICKSERVER_VERSION } else { "2026-06-18-debug-01" }
 $script:UnlockStale = $false
 $script:ForceSync = $false
 $script:HighVram = $false

@@ -17,6 +17,8 @@ set "LOG_NAME_BRIDGE_MESSAGE=bridge_message.log"
 set "LOG_NAME_WATCHDOG=watchdog.log"
 set "LOG_NAME_SETUP=setup.log"
 set "LOG_NAME_DOWNLOAD=download_model.log"
+set "KIMODO_QUICKSERVER_VERSION=2026-06-18-debug-01"
+echo [INFO] run_server version: %KIMODO_QUICKSERVER_VERSION%
 set "MODEL_NAME=Kimodo-SOMA-RP-v1"
 set "HIGHVRAM=0"
 set "OUTPUT_MODE=console"
