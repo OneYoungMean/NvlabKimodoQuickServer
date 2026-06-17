@@ -36,6 +36,9 @@ set "VRAM_PROBE_AVAILABLE=unknown"
 set "VRAM_PROBE_DEVICE_COUNT=unknown"
 set "VRAM_PROBE_TORCH_CUDA=unknown"
 set "VRAM_PROBE_STATUS=unknown"
+set "TEXT_ENCODER_DOWNLOAD_REQUIRED=1"
+set "TEXT_ENCODER_STATE_REASON=unset"
+set "VRAM_PROBE_LOG_ENABLED=1"
 
 if defined KIMODO_LLM2VEC_NF4_REPO_URL set "LLM2VEC_NF4_REPO_URL=%KIMODO_LLM2VEC_NF4_REPO_URL%"
 if defined KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK set "LLM2VEC_NF4_REPO_URL_FALLBACK=%KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK%"
@@ -144,6 +147,15 @@ echo [DEBUG] model repo urls: primary=%MODEL_REPO_URL% fallback=%MODEL_REPO_URL_
 call :ensure_repo_with_fallback "%MODEL_REPO_URL%" "%MODEL_REPO_URL_FALLBACK%" "%MODELS_DIR%\%MODEL_DIR_NAME%" "model.safetensors" "*"
 if errorlevel 1 exit /b 1
 
+call :detect_text_encoder_asset_state
+echo [DEBUG] text encoder state: required=%TEXT_ENCODER_DOWNLOAD_REQUIRED% reason=%TEXT_ENCODER_STATE_REASON% gguf=%GGUF_PRESENT% nf4=%NF4_PRESENT% full_base=%FULL_BASE_PRESENT% full_peft=%FULL_PEFT_PRESENT%
+if "%TEXT_ENCODER_DOWNLOAD_REQUIRED%"=="0" (
+  set "GGUF_DECISION_REASON=assets_present"
+  set "DOWNLOAD_GGUF=skip"
+  echo [INFO] Text encoder assets already present, skip VRAM probe and encoder download.
+  goto text_encoder_done
+)
+
 call :decide_download_gguf
 echo [DEBUG] GGUF decision: DOWNLOAD_GGUF=%DOWNLOAD_GGUF% reason=%GGUF_DECISION_REASON% vram_total=%VRAM_TOTAL_GB% probe_status=%VRAM_PROBE_STATUS%
 
@@ -158,6 +170,7 @@ if /I "%DOWNLOAD_GGUF%"=="1" (
   call :ensure_repo_with_fallback "%LLM2VEC_NF4_REPO_URL%" "%LLM2VEC_NF4_REPO_URL_FALLBACK%" "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4" "model.safetensors" "*" || exit /b 1
 )
 
+:text_encoder_done
 echo [OK] download_model complete.
 exit /b 0
 
@@ -185,7 +198,7 @@ for /f "delims=" %%S in ('where nvidia-smi 2^>nul') do (
 )
 if defined NVIDIA_SMI_EXE (
   set "VRAM_PROBE_STATUS=nvidia-smi"
-  echo [DEBUG] VRAM probe backend: nvidia-smi ^(!NVIDIA_SMI_EXE!^)
+  if "!VRAM_PROBE_LOG_ENABLED!"=="1" echo [DEBUG] VRAM probe backend: nvidia-smi ^(!NVIDIA_SMI_EXE!^)
   for /f "usebackq tokens=1 delims=," %%V in (`"!NVIDIA_SMI_EXE!" --query-gpu=memory.total --format=csv,noheader,nounits 2^>nul`) do (
     set "VRAM_TOTAL_MB_CUR="
     for /f "tokens=* delims= " %%T in ("%%V") do set "VRAM_TOTAL_MB_CUR=%%T"
@@ -204,38 +217,37 @@ if defined NVIDIA_SMI_EXE (
     )
     if /I not "!VRAM_TOTAL_GB!"=="none" (
       set "VRAM_PROBE_BACKEND=nvidia-smi"
-      echo [DEBUG] VRAM probe result: max_total=!VRAM_TOTAL_GB!GB from nvidia-smi
+      if "!VRAM_PROBE_LOG_ENABLED!"=="1" echo [DEBUG] VRAM probe result: max_total=!VRAM_TOTAL_GB!GB from nvidia-smi
     )
   ) else (
-    echo [WARN] VRAM probe via nvidia-smi returned no rows.
+    if "!VRAM_PROBE_LOG_ENABLED!"=="1" echo [WARN] VRAM probe via nvidia-smi returned no rows.
   )
 )
 if /I "!VRAM_TOTAL_GB!"=="none" (
   if defined VENV_PY (
     if exist "!VENV_PY!" (
       set "VRAM_PROBE_STATUS=torch"
-      echo [DEBUG] VRAM probe fallback python: !VENV_PY!
+      if "!VRAM_PROBE_LOG_ENABLED!"=="1" echo [DEBUG] VRAM probe fallback python: !VENV_PY!
       set "VRAM_PROBE_LOG=%TEMP%\kimodo_vram_probe_%RANDOM%%RANDOM%.log"
       (
         "!VENV_PY!" -c "import torch; print('probe_total=' + (str(round(torch.cuda.get_device_properties(0).total_memory/1073741824,2)) if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'none')); print('available=' + str(torch.cuda.is_available())); print('device_count=' + str(torch.cuda.device_count())); print('torch_cuda=' + str(torch.version.cuda))"
       ) > "!VRAM_PROBE_LOG!" 2>&1
       set "VRAM_PROBE_RC=%ERRORLEVEL%"
       for /f "usebackq delims=" %%L in ("!VRAM_PROBE_LOG!") do (
-        echo [DEBUG] VRAM probe output: %%L
         echo %%L | findstr /B /I "probe_total=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_TOTAL_GB=%%B"
         echo %%L | findstr /B /I "available=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_AVAILABLE=%%B"
         echo %%L | findstr /B /I "device_count=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_DEVICE_COUNT=%%B"
         echo %%L | findstr /B /I "torch_cuda=" >nul && for /f "tokens=1* delims==" %%A in ("%%L") do set "VRAM_PROBE_TORCH_CUDA=%%B"
       )
       del "!VRAM_PROBE_LOG!" >nul 2>nul
-      echo [DEBUG] VRAM probe rc=!VRAM_PROBE_RC! available=!VRAM_PROBE_AVAILABLE! device_count=!VRAM_PROBE_DEVICE_COUNT! torch_cuda=!VRAM_PROBE_TORCH_CUDA! total=!VRAM_TOTAL_GB!
+      if "!VRAM_PROBE_LOG_ENABLED!"=="1" echo [DEBUG] VRAM probe rc=!VRAM_PROBE_RC! available=!VRAM_PROBE_AVAILABLE! device_count=!VRAM_PROBE_DEVICE_COUNT! torch_cuda=!VRAM_PROBE_TORCH_CUDA! total=!VRAM_TOTAL_GB!
       if /I not "!VRAM_TOTAL_GB!"=="none" set "VRAM_PROBE_BACKEND=torch"
     ) else (
-      echo [WARN] VRAM probe skipped: venv python not found: !VENV_PY!
+      if "!VRAM_PROBE_LOG_ENABLED!"=="1" echo [WARN] VRAM probe skipped: venv python not found: !VENV_PY!
       set "VRAM_PROBE_STATUS=missing_python"
     )
   ) else (
-    echo [WARN] VRAM probe skipped: VENV_PY is not set.
+    if "!VRAM_PROBE_LOG_ENABLED!"=="1" echo [WARN] VRAM probe skipped: VENV_PY is not set.
     set "VRAM_PROBE_STATUS=missing_python"
   )
 )
@@ -505,6 +517,69 @@ call :validate_repo_safetensors "!SNAP_DEST_DIR!" "!SNAP_REQ_FILE!" "!SNAP_LFS_I
 if errorlevel 1 exit /b 1
 call :inject_missing_after_download "!SNAP_DEST_DIR!" "!SNAP_REQ_FILE!"
 echo [OK] Snapshot fallback succeeded: !SNAP_REPO_ID!
+exit /b 0
+
+:detect_text_encoder_asset_state
+set "GGUF_PRESENT=0"
+set "NF4_PRESENT=0"
+set "FULL_BASE_PRESENT=0"
+set "FULL_PEFT_PRESENT=0"
+set "TEXT_ENCODER_DOWNLOAD_REQUIRED=1"
+set "TEXT_ENCODER_STATE_REASON=missing_assets"
+set "VRAM_PROBE_LOG_ENABLED=1"
+
+call :ensure_gguf_presence "%MODELS_DIR%\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF"
+if not errorlevel 1 set "GGUF_PRESENT=1"
+
+if exist "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4\model.safetensors" (
+  call :validate_safetensor "%MODELS_DIR%\KIMODO-Meta3_llm2vec_NF4\model.safetensors"
+  if not errorlevel 1 set "NF4_PRESENT=1"
+)
+
+if exist "%MODELS_DIR%\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" (
+  set "FULL_BASE_PRESENT=1"
+) else if exist "%MODELS_DIR%\Meta-Llama-3-8B-Instruct\model.safetensors" (
+  call :validate_safetensor "%MODELS_DIR%\Meta-Llama-3-8B-Instruct\model.safetensors"
+  if not errorlevel 1 set "FULL_BASE_PRESENT=1"
+)
+
+if exist "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised\adapter_model.safetensors" (
+  call :validate_safetensor "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised\adapter_model.safetensors"
+  if not errorlevel 1 set "FULL_PEFT_PRESENT=1"
+) else if exist "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised\model.safetensors" (
+  call :validate_safetensor "%MODELS_DIR%\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised\model.safetensors"
+  if not errorlevel 1 set "FULL_PEFT_PRESENT=1"
+)
+
+if defined RUN_DEVICE if /I "%RUN_DEVICE%"=="cpu" if /I "%CPU_TEXT_ENCODER%"=="gguf" (
+  if "!GGUF_PRESENT!"=="1" (
+    set "TEXT_ENCODER_DOWNLOAD_REQUIRED=0"
+    set "TEXT_ENCODER_STATE_REASON=cpu_gguf_present"
+    set "VRAM_PROBE_LOG_ENABLED=0"
+  ) else (
+    set "TEXT_ENCODER_STATE_REASON=cpu_gguf_missing"
+  )
+  exit /b 0
+)
+
+if "%HIGHVRAM%"=="1" (
+  if "!GGUF_PRESENT!"=="1" if "!FULL_BASE_PRESENT!"=="1" if "!FULL_PEFT_PRESENT!"=="1" (
+    set "TEXT_ENCODER_DOWNLOAD_REQUIRED=0"
+    set "TEXT_ENCODER_STATE_REASON=highvram_all_present"
+    set "VRAM_PROBE_LOG_ENABLED=0"
+  ) else (
+    set "TEXT_ENCODER_STATE_REASON=highvram_missing_assets"
+  )
+  exit /b 0
+)
+
+if "!GGUF_PRESENT!"=="1" if "!NF4_PRESENT!"=="1" (
+  set "TEXT_ENCODER_DOWNLOAD_REQUIRED=0"
+  set "TEXT_ENCODER_STATE_REASON=nf4_and_gguf_present"
+  set "VRAM_PROBE_LOG_ENABLED=0"
+) else (
+  set "TEXT_ENCODER_STATE_REASON=nf4_or_gguf_missing"
+)
 exit /b 0
 
 :ensure_gguf_presence
