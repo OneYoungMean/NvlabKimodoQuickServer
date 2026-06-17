@@ -65,6 +65,7 @@ set "SERVER_WINDOW_STYLE=%KIMODO_SERVER_WINDOW_STYLE%"
 if not defined SERVER_WINDOW_STYLE set "SERVER_WINDOW_STYLE=Normal"
 set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 set "WATCH_PID="
+set "SKIP_DOWNLOAD_MODEL=0"
 
 :parse_args
 if "%~1"=="" goto parsed
@@ -249,17 +250,22 @@ if defined RUN_DEVICE (
     if /I "!CPU_TEXT_ENCODER!"=="gguf" set "USE_CPU_GGUF=1"
   )
 )
-	if "%USING_EXTERNAL_MODELS%"=="1" (
-	  echo [STEP] External models mode enabled, skip download_model.
-	) else (
-	  if exist "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" call "!COMMON_ENV_BAT!" :archive_file "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" "!RECYCLE_DIR!"
-	  echo [STEP] Downloading model assets for model=!MODEL_NAME! highvram=!HIGHVRAM!...
-	  if "%HIGHVRAM%"=="1" (
-	    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
-	  ) else (
-	    call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
+call :detect_download_assets_ready
+if "%USING_EXTERNAL_MODELS%"=="1" (
+  echo [STEP] External models mode enabled, skip download_model.
+) else (
+  if "%SKIP_DOWNLOAD_MODEL%"=="1" (
+    echo [INFO] Required model assets already present, skip download_model.
+  ) else (
+    if exist "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" call "!COMMON_ENV_BAT!" :archive_file "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" "!RECYCLE_DIR!"
+    echo [STEP] Downloading model assets for model=!MODEL_NAME! highvram=!HIGHVRAM!...
+    if "%HIGHVRAM%"=="1" (
+      call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
+    ) else (
+      call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
+    )
+    if errorlevel 1 exit /b 1
   )
-  if errorlevel 1 exit /b 1
 )
 
 echo [STEP] Preflight runtime import check...
@@ -366,3 +372,37 @@ call "!WATCHDOG_BRIDGE_BAT!" "!ROOT_DIR!" "!SERVER_PID!" "!PORT_FILE!" "!BOOTSTR
 set "RC=!ERRORLEVEL!"
 call "!COMMON_ENV_BAT!" :archive_file "!BRIDGE_PID_FILE!" "!RECYCLE_DIR!"
 exit /b %RC%
+
+:detect_download_assets_ready
+set "SKIP_DOWNLOAD_MODEL=0"
+if not exist "!MODELS_ROOT!\!MODEL_DIR_NAME!\model.safetensors" exit /b 0
+
+if "%HIGHVRAM%"=="1" (
+  if not exist "!MODELS_ROOT!\Meta-Llama-3-8B-Instruct\model.safetensors.index.json" (
+    if not exist "!MODELS_ROOT!\Meta-Llama-3-8B-Instruct\model.safetensors" exit /b 0
+  )
+  if not exist "!MODELS_ROOT!\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised\adapter_model.safetensors" (
+    if not exist "!MODELS_ROOT!\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised\model.safetensors" exit /b 0
+  )
+  set "SKIP_DOWNLOAD_MODEL=1"
+  exit /b 0
+)
+
+if "%USE_CPU_GGUF%"=="1" (
+  for /f %%F in ('dir /b /s "!GGUF_MODEL_PATH!\*.gguf" 2^>nul') do (
+    set "SKIP_DOWNLOAD_MODEL=1"
+    exit /b 0
+  )
+  exit /b 0
+)
+
+if exist "!MODELS_ROOT!\KIMODO-Meta3_llm2vec_NF4\model.safetensors" (
+  set "SKIP_DOWNLOAD_MODEL=1"
+  exit /b 0
+)
+
+for /f %%F in ('dir /b /s "!GGUF_MODEL_PATH!\*.gguf" 2^>nul') do (
+  set "SKIP_DOWNLOAD_MODEL=1"
+  exit /b 0
+)
+exit /b 0
