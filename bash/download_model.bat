@@ -271,14 +271,9 @@ if /I "!VRAM_DECISION!"=="gguf" (
 exit /b 0
 
 :ensure_git_and_lfs
-call :ensure_git
+call :ensure_local_git_context
 if errorlevel 1 (
-  echo [WARN] git unavailable, will rely on direct download fallback when possible.
-  exit /b 0
-)
-call :ensure_git_lfs
-if errorlevel 1 (
-  echo [WARN] git-lfs unavailable, git-based sync may fail and fall back to direct download.
+  echo [WARN] local git/git-lfs unavailable, will rely on direct download fallback when possible.
   exit /b 0
 )
 exit /b 0
@@ -319,28 +314,39 @@ if errorlevel 1 exit /b 1
 exit /b 0
 
 :ensure_git
+call :ensure_local_git_context
+if not errorlevel 1 exit /b 0
 set "GIT_HINT=%ROOT_DIR%\program\exe\git\cmd"
-if exist "%GIT_HINT%\git.exe" (
-  set "PATH=%GIT_HINT%;%PATH%"
-  git --version >nul 2>nul
-  if not errorlevel 1 exit /b 0
-)
 echo [ERROR] git not found.
 echo [ERROR] Place local git at: %GIT_HINT%\git.exe
 exit /b 1
 
 :ensure_git_lfs
+call :ensure_local_git_context
+if not errorlevel 1 exit /b 0
 set "LFS_HINT=%ROOT_DIR%\program\exe\git\mingw32\bin"
+echo [ERROR] git-lfs not found.
+echo [ERROR] Place local git-lfs at: %LFS_HINT%\git-lfs.exe
+exit /b 1
+
+:ensure_local_git_context
+set "GIT_HINT=%ROOT_DIR%\program\exe\git\cmd"
+set "LFS_HINT=%ROOT_DIR%\program\exe\git\mingw32\bin"
+if exist "%GIT_HINT%\git.exe" set "PATH=%GIT_HINT%;%PATH%"
 if exist "%LFS_HINT%\git-lfs.exe" set "PATH=%LFS_HINT%;%PATH%"
+git --version >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] local git missing or unusable: %GIT_HINT%\git.exe
+  exit /b 1
+)
 git lfs version >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] git-lfs not found.
-  echo [ERROR] Place local git-lfs at: %LFS_HINT%\git-lfs.exe
+  echo [ERROR] local git-lfs missing or unusable: %LFS_HINT%\git-lfs.exe
   exit /b 1
 )
 git lfs install --skip-repo >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] git lfs install failed.
+  echo [ERROR] local git lfs install failed.
   exit /b 1
 )
 exit /b 0
