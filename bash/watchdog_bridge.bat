@@ -9,9 +9,12 @@ set "WATCHDOG_INTERVAL_SEC=%~5"
 set "WATCHDOG_MAX_FAILS=%~6"
 set "WATCHDOG_RUNTIME_INTERVAL_SEC=%~7"
 set "WATCHDOG_IDLE_NOLOG_MAX=%~8"
+set "OWNER_PID=%~9"
+set "BRIDGE_PID_FILE=%ROOT_DIR%\.bridge.pid"
 set "COMMON_ENV_BAT=%ROOT_DIR%\bash\common_env.bat"
 set "WD_LOG_PATH=%ROOT_DIR%\log\bridge_message.log"
 set "WATCHDOG_LOG_PATH=%ROOT_DIR%\log\watchdog.log"
+set "QUIT_WAIT_SECONDS=3"
 set /a WD_FAILS=0
 set "WATCHDOG_STARTED_OK=0"
 set /a WD_LOG_STALE=0
@@ -23,7 +26,7 @@ if not defined WATCHDOG_RUNTIME_INTERVAL_SEC set "WATCHDOG_RUNTIME_INTERVAL_SEC=
 if not defined WATCHDOG_IDLE_NOLOG_MAX set "WATCHDOG_IDLE_NOLOG_MAX=300"
 if not exist "%ROOT_DIR%\log" mkdir "%ROOT_DIR%\log" >nul 2>nul
 
-call :log [INFO] Bridge watchdog started. pid=%WD_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
+call :log [INFO] Bridge watchdog started. pid=%WD_PID% owner_pid=%OWNER_PID% startup_interval=%WATCHDOG_INTERVAL_SEC%s startup_max_fails=%WATCHDOG_MAX_FAILS% runtime_interval=%WATCHDOG_RUNTIME_INTERVAL_SEC%s idle_nolog_max=%WATCHDOG_IDLE_NOLOG_MAX%
 goto watchdog_tick
 
 :log
@@ -72,6 +75,15 @@ if errorlevel 1 (
   )
 )
 
+if defined OWNER_PID (
+  call :is_pid_running "%OWNER_PID%"
+  if errorlevel 1 (
+    call :log [WARN] Owner pid missing during startup. owner_pid=%OWNER_PID% bridge_pid=%WD_PID%
+    call :shutdown_bridge_from_watchdog owner_exit_startup
+    exit /b !ERRORLEVEL!
+  )
+)
+
 if "%WATCHDOG_STARTED_OK%"=="1" goto runtime_tick
 
 if exist "%PORT_FILE%" (
@@ -93,12 +105,21 @@ if !WD_FAILS! geq %WATCHDOG_MAX_FAILS% (
     call :log [ERROR] Failed to kill bridge pid=%WD_PID%
     exit /b 1
   )
+  call :cleanup_files
   exit /b 1
 )
 call :sleep_seconds "%WATCHDOG_INTERVAL_SEC%"
 goto watchdog_tick
 
 :runtime_tick
+if defined OWNER_PID (
+  call :is_pid_running "%OWNER_PID%"
+  if errorlevel 1 (
+    call :log [WARN] Owner pid missing. owner_pid=%OWNER_PID% bridge_pid=%WD_PID%
+    call :shutdown_bridge_from_watchdog owner_exit
+    exit /b !ERRORLEVEL!
+  )
+)
 call :get_file_mtime_epoch "%WD_LOG_PATH%" WD_LOG_NOW
 if not defined WD_LOG_NOW set "WD_LOG_NOW=%WD_LOG_LAST%"
 if "%WD_LOG_NOW%"=="%WD_LOG_LAST%" (
@@ -114,7 +135,60 @@ if !WD_LOG_STALE! geq %WATCHDOG_IDLE_NOLOG_MAX% (
     call :log [ERROR] Failed to kill bridge pid=%WD_PID%
     exit /b 1
   )
+  call :cleanup_files
   exit /b 0
 )
 call :sleep_seconds "%WATCHDOG_RUNTIME_INTERVAL_SEC%"
 goto watchdog_tick
+
+:shutdown_bridge_from_watchdog
+set "SHUTDOWN_REASON=%~1"
+call :try_send_quit
+call :wait_bridge_exit "%QUIT_WAIT_SECONDS%"
+if not errorlevel 1 (
+  call :cleanup_files
+  call :log [INFO] Bridge exited after quit. reason=%SHUTDOWN_REASON%
+  exit /b 0
+)
+call :log [WARN] Bridge still alive after quit, forcing stop. reason=%SHUTDOWN_REASON% pid=%WD_PID%
+call "%COMMON_ENV_BAT%" :kill_pid_if_kimodo_bridge "%WD_PID%"
+if errorlevel 1 (
+  call :log [ERROR] Failed to kill bridge pid=%WD_PID% after quit fallback.
+  exit /b 1
+)
+call :cleanup_files
+exit /b 0
+
+:try_send_quit
+set "QHOST="
+set "QPORT="
+if exist "%PORT_FILE%" (
+  for /f "usebackq tokens=1,2 delims=:" %%A in ("%PORT_FILE%") do (
+    if not defined QHOST set "QHOST=%%A"
+    if not defined QPORT set "QPORT=%%B"
+  )
+)
+if not defined QHOST exit /b 0
+if not defined QPORT exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue'; $h='%QHOST%'; $p=[int]%QPORT%; $c=$null; try { $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if($iar.AsyncWaitHandle.WaitOne(1500)){ $c.EndConnect($iar); $s=$c.GetStream(); $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $w.WriteLine('{""cmd"":""quit""}'); $w.Close(); $s.Close() } } finally { if($c){$c.Close()} }" >nul 2>nul
+call :log [INFO] Sent quit to bridge endpoint %QHOST%:%QPORT%
+exit /b 0
+
+:wait_bridge_exit
+set "WAIT_SECONDS=%~1"
+if not defined WAIT_SECONDS set "WAIT_SECONDS=3"
+if %WAIT_SECONDS% LEQ 0 set "WAIT_SECONDS=1"
+set /a WAIT_TICKS=%WAIT_SECONDS%
+:wait_bridge_exit_loop
+call :is_pid_running "%WD_PID%"
+if errorlevel 1 exit /b 0
+if !WAIT_TICKS! LEQ 0 exit /b 1
+call :sleep_seconds 1
+set /a WAIT_TICKS-=1
+goto wait_bridge_exit_loop
+
+:cleanup_files
+if exist "%PORT_FILE%" del /f /q "%PORT_FILE%" >nul 2>nul
+if defined BRIDGE_PID_FILE if exist "%BRIDGE_PID_FILE%" del /f /q "%BRIDGE_PID_FILE%" >nul 2>nul
+exit /b 0

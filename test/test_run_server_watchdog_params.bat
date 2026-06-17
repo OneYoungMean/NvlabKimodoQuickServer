@@ -38,6 +38,7 @@ set "CASE_STARTUP_INTERVAL=%~2"
 set "CASE_MAX_FAILS=%~3"
 set "CASE_RUNTIME_INTERVAL=%~4"
 set "CASE_IDLE_NOLOG_MAX=%~5"
+set "CASE_OWNER_PID=%~6"
 
 echo [CASE] %CASE_NAME%
 
@@ -59,7 +60,11 @@ set "CASE_WRAPPER=%LOG_DIR%\test_watchdog_%CASE_NAME%_wrapper.bat"
   if defined CASE_MAX_FAILS echo set "KIMODO_WATCHDOG_STARTUP_MAX_FAILS=%CASE_MAX_FAILS%"
   if defined CASE_RUNTIME_INTERVAL echo set "KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC=%CASE_RUNTIME_INTERVAL%"
   if defined CASE_IDLE_NOLOG_MAX echo set "KIMODO_WATCHDOG_IDLE_NOLOG_MAX=%CASE_IDLE_NOLOG_MAX%"
-  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%CASE_RUN_LOG%"
+  if defined CASE_OWNER_PID (
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --watchpid %CASE_OWNER_PID% --output file --log "%CASE_RUN_LOG%"
+  ) else (
+    echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%CASE_RUN_LOG%"
+  )
   echo endlocal
 )
 start "%LAUNCH_TITLE%_%CASE_NAME%" cmd /k call "%CASE_WRAPPER%"
@@ -116,11 +121,13 @@ set "EXPECT_A=startup_interval=%EXP_STARTUP_INTERVAL%s"
 set "EXPECT_B=startup_max_fails=%EXP_STARTUP_MAX_FAILS%"
 set "EXPECT_C=runtime_interval=%EXP_RUNTIME_INTERVAL%s"
 set "EXPECT_D=idle_nolog_max=%EXP_IDLE_NOLOG_MAX%"
+set "EXPECT_OWNER=owner_pid="
 
 findstr /C:"%EXPECT_A%" "%CASE_RUN_LOG%" >nul || goto case_failed
 findstr /C:"%EXPECT_B%" "%CASE_RUN_LOG%" >nul || goto case_failed
 findstr /C:"%EXPECT_C%" "%CASE_RUN_LOG%" >nul || goto case_failed
 findstr /C:"%EXPECT_D%" "%CASE_RUN_LOG%" >nul || goto case_failed
+findstr /C:"%EXPECT_OWNER%" "%CASE_RUN_LOG%" >nul || goto case_failed
 
 echo [CASE:%CASE_NAME%] [PASS]
 exit /b 0

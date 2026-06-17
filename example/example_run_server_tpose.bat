@@ -73,7 +73,8 @@ call :archive_file "%SERVER_LOG%"
 if exist "!BRIDGE_SERVER_LOG!" call :archive_file "!BRIDGE_SERVER_LOG!"
 if exist "!BRIDGE_MESSAGE_LOG!" call :archive_file "!BRIDGE_MESSAGE_LOG!"
 
-set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%');"
+set "OWNER_PID_CMD=$ownerPidValue = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID) | Select-Object -ExpandProperty ParentProcessId); if(-not $ownerPidValue){ $ownerPidValue = $PID }"
+set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; %OWNER_PID_CMD%; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%','--watchpid',[string]$ownerPidValue);"
 if defined DEVICE call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--device','%DEVICE%');"
 if defined MODELS_ROOT call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--models-root','%MODELS_ROOT%');"
 call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--output','file','--log','%SERVER_LOG%');"
@@ -109,7 +110,6 @@ if errorlevel 1 (
   if !GRACE_ELAPSED! geq %RUNSERVER_EXIT_GRACE_SEC% (
     echo [ERROR] run_server exited and no serverport appeared within %RUNSERVER_EXIT_GRACE_SEC%s grace; setup/startup likely failed.
     call :dump_startup_logs
-    call :kill_pid
     exit /b 1
   )
 )
@@ -130,7 +130,6 @@ if !WAIT_SEC! geq %WAIT_TIMEOUT_SEC% (
     echo [ERROR] serverport missing after !WAIT_SEC!s: !PORT_FILE!
   )
   call :dump_startup_logs
-  call :kill_pid
   exit /b 1
 )
 goto wait_serverport
@@ -139,13 +138,11 @@ goto wait_serverport
 if not defined HOST (
   echo [ERROR] endpoint host is empty.
   call :dump_startup_logs
-  call :kill_pid
   exit /b 1
 )
 if not defined PORT (
   echo [ERROR] endpoint port is empty.
   call :dump_startup_logs
-  call :kill_pid
   exit /b 1
 )
 echo [TEST] TARGET=!HOST!:!PORT!
@@ -177,10 +174,10 @@ if exist "!PORT_FILE!" (
       "$ErrorActionPreference='SilentlyContinue'; $h='%QHOST%'; $p=[int]%QPORT%; $c=New-Object Net.Sockets.TcpClient; $iar=$c.BeginConnect($h,$p,$null,$null); if($iar.AsyncWaitHandle.WaitOne(1500)){ $c.EndConnect($iar); $s=$c.GetStream(); $w=New-Object IO.StreamWriter($s); $w.AutoFlush=$true; $w.WriteLine('{""cmd"":""quit""}'); $w.Close(); $s.Close() }; $c.Close();" >nul 2>nul
   )
 )
-call :wait_pid_or_kill
+call :wait_pid_exit
 exit /b 0
 
-:wait_pid_or_kill
+:wait_pid_exit
 if not exist "!PID_FILE!" exit /b 0
 set "SPID="
 for /f "usebackq delims=" %%A in ("!PID_FILE!") do (
@@ -201,23 +198,11 @@ if not errorlevel 1 (
 ping 127.0.0.1 -n 2 >nul
 set /a WAIT_SEC+=1
 if !WAIT_SEC! geq 15 (
-  call :kill_pid
+  echo [WARN] run_server wrapper still alive after quit grace; watchdog is expected to finish bridge cleanup.
+  call :archive_file "!PID_FILE!"
   exit /b 0
 )
 goto wait_loop
-
-:kill_pid
-if not exist "!PID_FILE!" exit /b 0
-set "KPID="
-for /f "usebackq delims=" %%A in ("!PID_FILE!") do (
-  if not defined KPID set "KPID=%%A"
-)
-if defined KPID (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference='SilentlyContinue'; $pidValue='%KPID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }" >nul 2>nul
-)
-call :archive_file "!PID_FILE!"
-exit /b 0
 
 :archive_file
 set "ARCHIVE_TARGET=%~1"

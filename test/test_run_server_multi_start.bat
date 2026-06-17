@@ -52,7 +52,7 @@ ping 127.0.0.1 -n 2 >nul
 set /a WAIT_SEC+=1
 if !WAIT_SEC! geq 120 (
   echo [ERROR] timeout waiting serverport.
-  call :kill_server_by_pidfile
+  call :archive_file "%PID_FILE%"
   exit /b 1
 )
 goto wait_port
@@ -62,7 +62,7 @@ echo [TEST] initial serverport=%PORT_BASE%
 call :wait_bridge_ready_log 180
 if errorlevel 1 (
   echo [ERROR] initial server did not reach ready state.
-  call :kill_server_by_pidfile
+  call :archive_file "%PID_FILE%"
   exit /b 1
 )
 
@@ -70,14 +70,14 @@ for /l %%I in (1,1,3) do (
   call :simulate_user_start "%%I"
   if errorlevel 1 (
     call :quit_server
-    call :kill_server_by_pidfile
+    call :archive_file "%PID_FILE%"
     exit /b 1
   )
 )
 
 echo [OK] multi-start simulation passed.
 call :quit_server
-call :kill_server_by_pidfile
+call :archive_file "%PID_FILE%"
 exit /b 0
 
 :simulate_user_start
@@ -86,7 +86,8 @@ set "RUN_LOG=%LOG_DIR%\test_multi_start_run%RUN_IDX%.log"
 call :archive_file "%RUN_LOG%"
 
 pushd "%ROOT_DIR%" >nul
-call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%RUN_LOG%"
+	for /f %%P in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$ownerPidValue=(Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID) | Select-Object -ExpandProperty ParentProcessId); if(-not $ownerPidValue){$ownerPidValue=$PID}; Write-Output $ownerPidValue"') do set "SIM_OWNER_PID=%%P"
+call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --watchpid "!SIM_OWNER_PID!" --output file --log "%RUN_LOG%"
 set "RC=%ERRORLEVEL%"
 popd >nul
 if not "%RC%"=="0" (
@@ -136,7 +137,8 @@ exit /b 0
 > "%RUN_WRAPPER%" (
   echo @echo off
   echo cd /d "%ROOT_DIR%"
-  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --output file --log "%BRIDGE_LOG%"
+	  echo for /f %%%%P in ^('powershell -NoProfile -ExecutionPolicy Bypass -Command "$ownerPidValue=(Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID) ^| Select-Object -ExpandProperty ParentProcessId); if(-not $ownerPidValue){$ownerPidValue=$PID}; Write-Output $ownerPidValue"'^) do set "OWNER_PID=%%%%P"
+  echo call run_server.bat --model Kimodo-SOMA-RP-v1 --models-root "%MODELS_ROOT%" --watchpid %%OWNER_PID%% --output file --log "%BRIDGE_LOG%"
 )
 start "%RUN_WINDOW_TITLE%" cmd /k call "%RUN_WRAPPER%"
 exit /b 0
@@ -226,18 +228,11 @@ if not errorlevel 1 (
 ping 127.0.0.1 -n 2 >nul
 set /a WAIT_CUR+=1
 if !WAIT_CUR! geq !WAIT_MAX! (
-  call :kill_server_by_pidfile
+  echo [WARN] server wrapper still alive after wait; relying on watchdog cleanup.
+  call :archive_file "%PID_FILE%"
   exit /b 0
 )
 goto wait_exit_loop
-
-:kill_server_by_pidfile
-if exist "%PID_FILE%" call :archive_file "%PID_FILE%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='SilentlyContinue'; $root=(Resolve-Path -LiteralPath '%ROOT_DIR%').Path; $pat=[regex]::Escape($root); Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match 'kimodo\\.bridge\\.bridge_server' -and $_.CommandLine -match $pat } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match [regex]::Escape('%RUN_WRAPPER%') } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>nul
-exit /b 0
 
 :archive_file
 set "ARCHIVE_TARGET=%~1"
