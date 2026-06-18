@@ -162,14 +162,21 @@ set "FULL_PEFT_FALLBACK="
 set "FULL_PEFT_VALIDATE=full_peft"
 
 set "VRAM_MB=0"
+set "VRAM_PROBE_FILE=%TEMP%\kimodo_vram_probe_%RANDOM%%RANDOM%.txt"
 where nvidia-smi >nul 2>nul
 if not errorlevel 1 (
-  for /f "tokens=* delims= " %%A in ('nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2^>nul') do (
-    set "VRAM_CUR=%%A"
-    set /a VRAM_CUR=VRAM_CUR >nul 2>nul
-    if not errorlevel 1 if !VRAM_CUR! gtr !VRAM_MB! set "VRAM_MB=!VRAM_CUR!"
+  rem Some Windows shells mishandle direct command capture here, so write the
+  rem probe result to a temp file first, then parse the numeric token safely.
+  nvidia-smi --query-gpu=memory.total --format=csv,noheader > "!VRAM_PROBE_FILE!" 2>nul
+  if not errorlevel 1 if exist "!VRAM_PROBE_FILE!" (
+    for /f "usebackq tokens=1 delims= " %%A in ("!VRAM_PROBE_FILE!") do (
+      set "VRAM_CUR=%%A"
+      set /a VRAM_CUR=VRAM_CUR >nul 2>nul
+      if not errorlevel 1 if !VRAM_CUR! gtr !VRAM_MB! set "VRAM_MB=!VRAM_CUR!"
+    )
   )
 )
+if exist "!VRAM_PROBE_FILE!" del /q "!VRAM_PROBE_FILE!" >nul 2>nul
 set "ENCODER_KIND=gguf"
 if !VRAM_MB! geq 6144 (
   if /I "%HIGHVRAM%"=="1" (
