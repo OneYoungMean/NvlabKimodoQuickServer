@@ -261,10 +261,22 @@ if "%USING_EXTERNAL_MODELS%"=="1" (
   ) else (
     if exist "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" call "!COMMON_ENV_BAT!" :archive_file "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" "!RECYCLE_DIR!"
     echo [STEP] Downloading model assets for model=!MODEL_NAME! highvram=!HIGHVRAM!...
-    if "%HIGHVRAM%"=="1" (
-      call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
+    if defined RUN_DEVICE (
+      if "%HIGHVRAM%"=="1" (
+        echo [INFO] download_model args: --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
+        call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
+      ) else (
+        echo [INFO] download_model args: --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
+        call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
+      )
     ) else (
-      call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --device "!RUN_DEVICE!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
+      if "%HIGHVRAM%"=="1" (
+        echo [INFO] download_model args: --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
+        call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --cpu-text-encoder "!CPU_TEXT_ENCODER!" --highvram
+      ) else (
+        echo [INFO] download_model args: --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
+        call "!DOWNLOAD_BAT!" --output "!OUTPUT_MODE!" --log "!LOG_DIR!\!LOG_NAME_DOWNLOAD!" --unlock-stale --model "!MODEL_RUN_NAME!" --venv "!VENV_PY!" --cpu-text-encoder "!CPU_TEXT_ENCODER!"
+      )
     )
     if errorlevel 1 exit /b 1
   )

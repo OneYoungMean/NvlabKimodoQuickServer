@@ -622,6 +622,7 @@ function Invoke-Main {
   New-Item -ItemType Directory -Force -Path $script:ModelsDir | Out-Null
   Set-LocalGitContext
 
+  Write-Line "[INFO] args model=$script:ModelName output=$script:OutputMode log=$script:LogPath device=$script:RunDevice cpu_text_encoder=$script:CpuTextEncoder highvram=$script:HighVram unlock_stale=$script:UnlockStale force_sync=$script:ForceSync"
   Write-Line "[STEP] Downloading models (single-thread)..."
   $alias = Resolve-ModelAlias $script:ModelName
   if ($null -eq $alias) { return 1 }
