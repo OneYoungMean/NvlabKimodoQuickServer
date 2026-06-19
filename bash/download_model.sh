@@ -26,8 +26,8 @@ HIGHVRAM=0
 
 LLM2VEC_NF4_REPO_URL="${KIMODO_LLM2VEC_NF4_REPO_URL:-https://www.modelscope.cn/oneyoungmean/KIMODO-Meta3_llm2vec_NF4.git}"
 LLM2VEC_NF4_REPO_URL_FALLBACK="${KIMODO_LLM2VEC_NF4_REPO_URL_FALLBACK:-https://huggingface.co/Aero-Ex/KIMODO-Meta3_llm2vec_NF4}"
-GGUF_REPO_URL="${KIMODO_GGUF_REPO_URL:-https://www.modelscope.cn/LLM-Research/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF.git}"
-GGUF_REPO_URL_FALLBACK="${KIMODO_GGUF_REPO_URL_FALLBACK:-https://huggingface.co/Aero-Ex/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF}"
+GGUF_REPO_URL="${KIMODO_GGUF_REPO_URL:-https://www.modelscope.cn/models/oneyoungmean/KIMODO-Meta3_llm2vec_FP16-Q4_K_M}"
+GGUF_REPO_URL_FALLBACK="${KIMODO_GGUF_REPO_URL_FALLBACK:-https://huggingface.co/oneyoungmean/KIMODO-Meta3_llm2vec_FP16-Q4_K_M}"
 META_LLAMA_REPO_URL="${KIMODO_META_LLAMA_REPO_URL:-https://www.modelscope.cn/models/LLM-Research/Meta-Llama-3-8B-Instruct}"
 LLM2VEC_PEFT_REPO_URL="${KIMODO_LLM2VEC_PEFT_REPO_URL:-https://www.modelscope.cn/models/oneyoungmean/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised}"
 
@@ -291,7 +291,7 @@ main() {
   if [[ "${DOWNLOAD_GGUF}" == "1" ]]; then
     echo "[STEP] GGUF mode enabled: downloading GGUF text encoder (skip local NF4/full encoder)"
     ensure_repo_with_fallback "${GGUF_REPO_URL}" "${GGUF_REPO_URL_FALLBACK}" \
-      "${MODELS_DIR}/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF" ".gguf" "*" || return 1
+      "${MODELS_DIR}/KIMODO-Meta3_llm2vec_FP16-Q4_K_M" ".gguf" "*" || return 1
   elif [[ "${HIGHVRAM}" == "1" ]]; then
     echo "[STEP] highvram mode enabled: full text-encoder assets"
     ensure_repo "${META_LLAMA_REPO_URL}" "${MODELS_DIR}/Meta-Llama-3-8B-Instruct" "model.safetensors.index.json" "*" || return 1

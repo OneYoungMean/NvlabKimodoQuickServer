@@ -141,9 +141,9 @@ set "MODEL_PRIMARY=https://www.modelscope.cn/nv-community/%MODEL_REPO_NAME%.git"
 set "MODEL_FALLBACK=https://huggingface.co/nvidia/%MODEL_REPO_NAME%.git"
 set "MODEL_VALIDATE=model"
 
-set "GGUF_TARGET=%MODELS_ROOT%\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF"
-set "GGUF_PRIMARY=https://www.modelscope.cn/LLM-Research/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF.git"
-set "GGUF_FALLBACK=https://huggingface.co/Aero-Ex/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF.git"
+set "GGUF_TARGET=%MODELS_ROOT%\KIMODO-Meta3_llm2vec_FP16-Q4_K_M"
+set "GGUF_PRIMARY=https://www.modelscope.cn/oneyoungmean/KIMODO-Meta3_llm2vec_FP16-Q4_K_M.git"
+set "GGUF_FALLBACK=https://huggingface.co/oneyoungmean/KIMODO-Meta3_llm2vec_FP16-Q4_K_M.git"
 set "GGUF_VALIDATE=gguf"
 
 set "NF4_TARGET=%MODELS_ROOT%\KIMODO-Meta3_llm2vec_NF4"
