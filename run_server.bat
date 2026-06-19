@@ -229,7 +229,7 @@ if /I "%HIGHVRAM%"=="1" (
   set "TEXT_ENCODERS_DIR="
   set "KIMODO_LLM2VEC_PEFT_DIR="
 )
-if not defined GGUF_MODEL_PATH set "GGUF_MODEL_PATH=!MODELS_ROOT!\Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF"
+if not defined GGUF_MODEL_PATH set "GGUF_MODEL_PATH=!MODELS_ROOT!\KIMODO-Meta3_llm2vec_FP16-Q4_K_M"
 if exist "!PORT_FILE!" (
   echo [WARN] Found existing serverport, archiving stale file before fresh launch.
   call "!COMMON_ENV_BAT!" :archive_file "!PORT_FILE!" "!RECYCLE_DIR!"

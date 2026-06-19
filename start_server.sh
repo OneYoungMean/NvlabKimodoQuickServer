@@ -158,7 +158,7 @@ else
   TEXT_ENCODERS_DIR=""
   KIMODO_LLM2VEC_PEFT_DIR=""
 fi
-[[ -z "${GGUF_MODEL_PATH}" ]] && GGUF_MODEL_PATH="${MODELS_ROOT}/Meta-Llama-3.1-8B-Instruct-hf-Q4_K_M-GGUF"
+[[ -z "${GGUF_MODEL_PATH}" ]] && GGUF_MODEL_PATH="${MODELS_ROOT}/KIMODO-Meta3_llm2vec_FP16-Q4_K_M"
 
 if [[ -f "${PORT_FILE}" ]]; then
   echo "[WARN] Found existing serverport, archiving stale file before fresh launch."

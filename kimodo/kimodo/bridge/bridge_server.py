@@ -36,6 +36,12 @@ def _default_bridge_log_path(root: str) -> str:
     return os.path.join(root, "log", "bridge_server.log")
 
 
+def _default_gguf_model_path(root: str) -> str:
+    if not root:
+        return ""
+    return os.path.join(root, "models", "KIMODO-Meta3_llm2vec_FP16-Q4_K_M")
+
+
 def _detect_total_vram_gb() -> float:
     """Total VRAM of cuda:0 in GiB, or 0.0 when no usable CUDA device exists."""
     try:
@@ -810,6 +816,8 @@ def main():
         if use_gguf_encoder:
             try:
                 gguf_path = os.environ.get("KIMODO_GGUF_MODEL_PATH", "").strip()
+                if not gguf_path:
+                    gguf_path = _default_gguf_model_path(kimodo_root)
                 gguf_ctx = int(os.environ.get("KIMODO_GGUF_CTX", "4096"))
                 gguf_timeout = int(os.environ.get("KIMODO_GGUF_STARTUP_TIMEOUT_SEC", "120"))
                 nonlocal llama_service
