@@ -8,6 +8,7 @@ import os
 import numpy as np
 import torch
 from torch import nn
+from kimodo.bridge.quickserver_assets import FULL_PEFT_LOCAL_DIR, NF4_LOCAL_DIR
 from .llm2vec import LLM2Vec
 
 class LLM2VecEncoder(nn.Module):
@@ -64,7 +65,7 @@ class LLM2VecEncoder(nn.Module):
         kimodo_root = os.environ.get("KIMODO_ROOT_PATH", "").strip()
         if kimodo_root:
             candidates.append(
-                os.path.abspath(os.path.join(kimodo_root, "models", "KIMODO-Meta3_llm2vec_NF4"))
+                os.path.abspath(os.path.join(kimodo_root, "models", NF4_LOCAL_DIR))
             )
 
         # Keep compatibility with the original README override placeholder.
@@ -76,12 +77,12 @@ class LLM2VecEncoder(nn.Module):
         this_dir = os.path.dirname(os.path.abspath(__file__))
         candidates.append(
             os.path.abspath(
-                os.path.join(this_dir, os.pardir, os.pardir, os.pardir, os.pardir, "models", "KIMODO-Meta3_llm2vec_NF4")
+                os.path.join(this_dir, os.pardir, os.pardir, os.pardir, os.pardir, "models", NF4_LOCAL_DIR)
             )
         )
         candidates.append(
             os.path.abspath(
-                os.path.join(this_dir, os.pardir, os.pardir, os.pardir, "models", "KIMODO-Meta3_llm2vec_NF4")
+                os.path.join(this_dir, os.pardir, os.pardir, os.pardir, "models", NF4_LOCAL_DIR)
             )
         )
 
@@ -100,7 +101,7 @@ class LLM2VecEncoder(nn.Module):
 
         raise FileNotFoundError(
             "[LLM2VecEncoder] Missing local text encoder directory. "
-            "Set KIMODO_LLM2VEC_DIR or ensure KIMODO_ROOT_PATH/models/KIMODO-Meta3_llm2vec_NF4 exists. "
+            f"Set KIMODO_LLM2VEC_DIR or ensure KIMODO_ROOT_PATH/models/{NF4_LOCAL_DIR} exists. "
             f"Checked: {ordered_candidates}"
         )
 
@@ -121,7 +122,7 @@ class LLM2VecEncoder(nn.Module):
         if kimodo_root:
             candidates.append(
                 os.path.abspath(
-                    os.path.join(kimodo_root, "models", "LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised")
+                    os.path.join(kimodo_root, "models", FULL_PEFT_LOCAL_DIR)
                 )
             )
 

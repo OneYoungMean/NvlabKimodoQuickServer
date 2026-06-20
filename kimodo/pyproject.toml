@@ -17,6 +17,7 @@ dependencies = [
   "transformers==5.1.0",
   "urllib3>=2.6.3",
   "boto3",
+  "modelscope==1.37.1",
   "peft>=0.18",
   "einops>=0.7",
   "tqdm>=4.0",

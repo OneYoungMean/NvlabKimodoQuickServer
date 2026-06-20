@@ -29,6 +29,14 @@ from typing import Any
 
 import numpy as np
 
+from kimodo.bridge.quickserver_assets import (
+    FULL_BASE_LOCAL_DIR,
+    FULL_PEFT_LOCAL_DIR,
+    GGUF_LOCAL_DIR,
+    NF4_LOCAL_DIR,
+    default_gguf_model_path,
+)
+
 
 def _default_bridge_log_path(root: str) -> str:
     if not root:
@@ -39,7 +47,7 @@ def _default_bridge_log_path(root: str) -> str:
 def _default_gguf_model_path(root: str) -> str:
     if not root:
         return ""
-    return os.path.join(root, "models", "KIMODO-Meta3_llm2vec_FP16-Q4_K_M")
+    return default_gguf_model_path(os.path.join(root, "models"))
 
 
 def _detect_total_vram_gb() -> float:
@@ -94,17 +102,18 @@ def _out(obj):
 
 def _log(msg: str):
     line = str(msg)
+    log_path = os.environ.get("KIMODO_BRIDGE_LOG", "")
+    direct_only = os.environ.get("KIMODO_BRIDGE_LOG_DIRECT_ONLY", "").strip() == "1"
     sys.stderr.write(line + "\n")
     sys.stderr.flush()
-
-    log_path = os.environ.get("KIMODO_BRIDGE_LOG", "")
+    if direct_only:
+        return
     if not log_path:
         root = os.environ.get("KIMODO_ROOT_PATH", "")
         if root:
             log_path = _default_bridge_log_path(root)
     if not log_path:
         return
-
     try:
         log_dir = os.path.dirname(log_path)
         if log_dir:
@@ -275,24 +284,7 @@ class LlamaServiceManager:
         raw_path = (self.gguf_model_path or "").strip()
         if not raw_path:
             raise ValueError("KIMODO_GGUF_MODEL_PATH is empty.")
-        abs_path = os.path.abspath(raw_path)
-        if os.path.isfile(abs_path):
-            if abs_path.lower().endswith(".gguf"):
-                return abs_path
-            raise ValueError(f"KIMODO_GGUF_MODEL_PATH is not a .gguf file: {abs_path}")
-
-        if not os.path.isdir(abs_path):
-            raise FileNotFoundError(f"KIMODO_GGUF_MODEL_PATH does not exist: {abs_path}")
-
-        matches: list[str] = []
-        for root, _dirs, files in os.walk(abs_path):
-            for name in files:
-                if name.lower().endswith(".gguf"):
-                    matches.append(os.path.join(root, name))
-        if not matches:
-            raise FileNotFoundError(f"No .gguf files found under: {abs_path}")
-        matches.sort(key=lambda p: (len(p), p.lower()))
-        return os.path.abspath(matches[0])
+        return os.path.abspath(raw_path)
 
     def _pick_free_port(self) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

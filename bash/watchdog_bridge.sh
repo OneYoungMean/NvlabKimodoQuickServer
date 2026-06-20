@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/common_env.sh"
 
-WD_LOG_PATH="${ROOT_DIR}/log/bridge_message.log"
+WD_LOG_PATH="${ROOT_DIR}/log/bridge_server.log"
 WATCHDOG_LOG_PATH="${ROOT_DIR}/log/watchdog.log"
 mkdir -p "${ROOT_DIR}/log" >/dev/null 2>&1 || true
 

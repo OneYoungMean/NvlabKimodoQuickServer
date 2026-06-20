@@ -25,12 +25,8 @@
 - `KIMODO_TEST_SCENARIO_NAME=<name>`
 
 ## 3. `bash\download_model.bat`
-- `--model <name|alias>`: 模型名称或别名（默认 `Kimodo-SOMA-RP-v1`）。
-- `--highvram`: 下载 high-vram 依赖模型集。
-- `--output <console|file>`: 输出模式，默认 `console`。
-- `--log <path>`: `file` 模式日志路径，默认 `log\download_model.log`。
-- `--unlock-stale`: 检测并旋转 `.git\index.lock`。
-- `--force`: 强制同步。
+- 已收敛到 `python quickserver.py prepare-models` / `run_server.bat` 主流程，不再作为独立正式接口。
+- 模型下载默认走 ModelScope，失败即报错，不做 HF 兜底。
 
 相关环境变量：
 - `KIMODO_LLM2VEC_NF4_REPO_URL`
@@ -47,8 +43,8 @@
 - `--highvram`: 启用 high-vram 模式。
 - `--models-root <path>`: 指定外部模型根目录（存在即跳过下载流程）。
 - `--output <console|file>`: 输出模式，默认 `console`。
-- `--log <path>`: `file` 模式下 `run_server` 自身日志路径，默认 `log\run_server.log`。
-- `bridge_server` 统一日志固定为 `log\bridge_server.log`（包含 bridge stdout/stderr/bootstrap 信息）。
+- `--log <path>`: `file` 模式下主日志路径，默认 `log\bridge_server.log`。
+- `bridge_server` 主日志固定为 `log\bridge_server.log`。
 - `--force-setup`: 归档 setup sentinel 后重新 setup。
 
 关键运行变量：
@@ -58,7 +54,7 @@
 ### 启动与 watchdog
 - `KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC`: 启动阶段等待 `serverport` 的轮询间隔（默认 `1` 秒）。
 - `KIMODO_WATCHDOG_STARTUP_MAX_FAILS`: 启动阶段等待 `serverport` 的最大轮询次数（默认 `180`）。
-- `KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC`: 运行阶段检查 `log\bridge_message.log` 更新时间间隔（默认 `1` 秒）。
+- `KIMODO_WATCHDOG_RUNTIME_INTERVAL_SEC`: 运行阶段检查 `log\bridge_server.log` 更新时间间隔（默认 `1` 秒）。
 - `KIMODO_WATCHDOG_IDLE_NOLOG_MAX`: 运行阶段日志未更新的最大连续次数（默认 `300`），超过则自动关闭进程。
 
 说明：
@@ -81,8 +77,7 @@
 - 默认所有日志写入 `log\`。
 - 典型文件：
   - `log\setup.log`
-  - `log\download_model.log`
-  - `log\run_server.log`（或调用方指定的 run_server 日志）
-  - `log\bridge_server.log`（bridge 统一日志，含 bootstrap/stderr）
+  - `log\bridge_server.log`（run/bridge 主日志）
+  - `log\watchdog.log`
   - `log\example_run_server_tpose.log`
   - `log\example_run_server_tpose_client.log`

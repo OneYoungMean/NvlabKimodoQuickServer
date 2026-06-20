@@ -9,9 +9,8 @@ for %%I in ("!ROOT_DIR!\run_server.bat") do set "LAUNCHER=%%~fI"
 for %%I in ("!SCRIPT_DIR!\example_run_server_tpose_client.ps1") do set "CLIENT_PS1=%%~fI"
 set "PORT_FILE=!ROOT_DIR!\serverport"
 set "PID_FILE=!ROOT_DIR!\log\example_run_server_tpose.pid"
-set "SERVER_LOG=!ROOT_DIR!\log\example_run_server_tpose_server.log"
 set "BRIDGE_SERVER_LOG=!ROOT_DIR!\log\bridge_server.log"
-set "BRIDGE_MESSAGE_LOG=!ROOT_DIR!\log\bridge_message.log"
+set "WATCHDOG_LOG=!ROOT_DIR!\log\watchdog.log"
 set "RECYCLE_DIR=!ROOT_DIR!\archive\recycle"
 set "WAIT_TIMEOUT_SEC=%KIMODO_TEST_WAIT_TIMEOUT_SEC%"
 if not defined WAIT_TIMEOUT_SEC set "WAIT_TIMEOUT_SEC=600"
@@ -69,15 +68,13 @@ echo [TEST] OUTPUT=file
 
 call :archive_file "%PORT_FILE%"
 call :archive_file "%PID_FILE%"
-call :archive_file "%SERVER_LOG%"
 if exist "!BRIDGE_SERVER_LOG!" call :archive_file "!BRIDGE_SERVER_LOG!"
-if exist "!BRIDGE_MESSAGE_LOG!" call :archive_file "!BRIDGE_MESSAGE_LOG!"
 
 set "OWNER_PID_CMD=$ownerPidValue = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID) | Select-Object -ExpandProperty ParentProcessId); if(-not $ownerPidValue){ $ownerPidValue = $PID }"
 set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; %OWNER_PID_CMD%; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%','--watchpid',[string]$ownerPidValue);"
 if defined DEVICE call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--device','%DEVICE%');"
 if defined MODELS_ROOT call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--models-root','%MODELS_ROOT%');"
-call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--output','file','--log','%SERVER_LOG%');"
+call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--output','file','--log','%BRIDGE_SERVER_LOG%');"
 set "LAUNCH_PS_CMD=!LAUNCH_PS_CMD! $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $args -WorkingDirectory '%ROOT_DIR%' -WindowStyle Normal -PassThru; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ASCII"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "!LAUNCH_PS_CMD!"
@@ -244,7 +241,7 @@ exit /b 1
 :read_endpoint_from_logs
 set "HOST="
 set "PORT="
-for /f "usebackq tokens=1,2 delims=:" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $paths=@('%BRIDGE_SERVER_LOG%','%BRIDGE_MESSAGE_LOG%'); $h=''; $pt=''; foreach($p in $paths){ if(-not (Test-Path -LiteralPath $p)){ continue }; $lines=Get-Content -LiteralPath $p -Tail 240; for($i=$lines.Count-1; $i -ge 0; $i--){ $line=[string]$lines[$i]; if($line -match 'ready host=(?<host>\\S+) port=(?<port>\\d+)'){ $h=$Matches['host']; $pt=$Matches['port']; break } }; if($h -and $pt){ break } }; if($h -and $pt){ Write-Output ($h + ':' + $pt) }"`) do (
+for /f "usebackq tokens=1,2 delims=:" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $p='%BRIDGE_SERVER_LOG%'; $h=''; $pt=''; if(Test-Path -LiteralPath $p){ $lines=Get-Content -LiteralPath $p -Tail 240; for($i=$lines.Count-1; $i -ge 0; $i--){ $line=[string]$lines[$i]; if($line -match 'ready host=(?<host>\\S+) port=(?<port>\\d+)'){ $h=$Matches['host']; $pt=$Matches['port']; break } } }; if($h -and $pt){ Write-Output ($h + ':' + $pt) }"`) do (
   if not defined HOST set "HOST=%%A"
   if not defined PORT set "PORT=%%B"
 )
@@ -269,10 +266,8 @@ exit /b 0
 :dump_startup_logs
 echo [DIAG] tail: %ROOT_DIR%\log\setup.log
 powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%ROOT_DIR%\log\setup.log'){Get-Content '%ROOT_DIR%\log\setup.log' -Tail 40}" 2>nul
-echo [DIAG] tail: %ROOT_DIR%\log\download_model.log
-powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%ROOT_DIR%\log\download_model.log'){Get-Content '%ROOT_DIR%\log\download_model.log' -Tail 40}" 2>nul
 echo [DIAG] tail: %ROOT_DIR%\log\bridge_server.log
 powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%ROOT_DIR%\log\bridge_server.log'){Get-Content '%ROOT_DIR%\log\bridge_server.log' -Tail 40}" 2>nul
-echo [DIAG] tail: %SERVER_LOG%
-powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%SERVER_LOG%'){Get-Content '%SERVER_LOG%' -Tail 40}" 2>nul
+echo [DIAG] tail: %ROOT_DIR%\log\watchdog.log
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%ROOT_DIR%\log\watchdog.log'){Get-Content '%ROOT_DIR%\log\watchdog.log' -Tail 40}" 2>nul
 exit /b 0
