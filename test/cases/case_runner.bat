@@ -133,7 +133,7 @@ if "%EXPECT_FAIL_RUN1%"=="1" (
 )
 
 if "%EXPECT_FAIL_RUN1%"=="1" (
-  if exist "%RUN_ROOT%\bash\setup.bat" (
+  if exist "%RUN_ROOT%\run_server.bat" (
     if not exist "%RUN_ROOT%\archive\recycle" mkdir "%RUN_ROOT%\archive\recycle" >nul 2>nul
     if exist "%RUN_ROOT%\.setup.lock" (
       move "%RUN_ROOT%\.setup.lock" "%RUN_ROOT%\archive\recycle\.setup.lock.recover.%RANDOM%%RANDOM%" >nul 2>nul
@@ -152,7 +152,7 @@ if "%EXPECT_FAIL_RUN1%"=="1" (
       move "%RUN_ROOT%\serverport" "%RUN_ROOT%\archive\recycle\serverport.recover.%RANDOM%%RANDOM%" >nul 2>nul
     )
     pushd "%RUN_ROOT%" >nul
-    call "%RUN_ROOT%\bash\setup.bat" --force --output file --log "%RUN_ROOT%\log\setup.log"
+    call "%RUN_ROOT%\run_server.bat" setup --force --output file --log "%RUN_ROOT%\log\setup.log"
     set "RECOVER_SETUP_RC=!ERRORLEVEL!"
     popd >nul
     if not "!RECOVER_SETUP_RC!"=="0" (
@@ -199,9 +199,9 @@ exit /b %RETRY_RC%
 
 :warmup_setup
 if exist "%RUN_ROOT%\.setup.complete" exit /b 0
-if not exist "%RUN_ROOT%\bash\setup.bat" exit /b 0
+if not exist "%RUN_ROOT%\run_server.bat" exit /b 0
 pushd "%RUN_ROOT%" >nul
-call "%RUN_ROOT%\bash\setup.bat" --output file --log "%RUN_ROOT%\log\setup.log"
+call "%RUN_ROOT%\run_server.bat" setup --output file --log "%RUN_ROOT%\log\setup.log"
 set "WARMUP_SETUP_RC=%ERRORLEVEL%"
 popd >nul
 if not "%WARMUP_SETUP_RC%"=="0" (
@@ -251,7 +251,7 @@ set "TEST_BAT=%RUN_ROOT%\example\example_run_server_tpose.bat"
 if not exist "%TEST_BAT%" exit /b 1
 if not exist "%RUN_ROOT%\log" mkdir "%RUN_ROOT%\log" >nul 2>nul
 pushd "%RUN_ROOT%" >nul
-call "%RUN_ROOT%\bash\setup.bat" --force --output file --log "%RUN_ROOT%\log\setup.log"
+call "%RUN_ROOT%\run_server.bat" setup --force --output file --log "%RUN_ROOT%\log\setup.log"
 set "REBOOT_SETUP_RC=%ERRORLEVEL%"
 popd >nul
 if not "%REBOOT_SETUP_RC%"=="0" exit /b 1
@@ -269,6 +269,5 @@ set "DETAIL=%~2"
   echo RUN_ROOT=%RUN_ROOT%
 )
 exit /b 0
-
 
 

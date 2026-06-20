@@ -20,7 +20,7 @@
 ## Install
 ```bat
 cd /d C:\nvlab\NvlabKimodoQuickServer
-bash\setup.bat --output console
+run_server.bat setup --output console
 ```
 
 ## Example

@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = "C:\nvlab\NvlabKimodoQuickServer"
-$setupBat = Join-Path $root "bash\setup.bat"
+$setupBat = Join-Path $root "run_server.bat"
 $runBat = Join-Path $root "run_server.bat"
 $clientPs1 = Join-Path $root "example\example_run_server_tpose_client.ps1"
 $llamaExe = Join-Path $root "program\exe\llama\llama-server.exe"
@@ -31,7 +31,7 @@ Write-Host "[INFO] ROOT=$root"
 Write-Host "[INFO] MODELS_ROOT=$ModelsRoot"
 Write-Host "[INFO] GGUF_PATH=$GgufPath"
 
-if (-not (Test-Path -LiteralPath $setupBat)) { throw "Missing setup.bat: $setupBat" }
+if (-not (Test-Path -LiteralPath $setupBat)) { throw "Missing run_server.bat: $setupBat" }
 if (-not (Test-Path -LiteralPath $runBat)) { throw "Missing run_server.bat: $runBat" }
 if (-not (Test-Path -LiteralPath $clientPs1)) { throw "Missing client script: $clientPs1" }
 if (-not (Test-Path -LiteralPath $llamaExe)) { throw "Missing local llama-server: $llamaExe" }
@@ -61,7 +61,7 @@ foreach ($f in @($setupLog, $runLog, $clientLog, $portFile)) {
 
 Write-Host "[STEP] setup cpu"
 $env:KIMODO_TEST_SETUP_DEVICE = "cpu"
-& $setupBat --output file --log $setupLog
+& $setupBat setup --output file --log $setupLog
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] setup failed"
     if (Test-Path -LiteralPath $setupLog) { Get-Content -LiteralPath $setupLog -Tail 120 }

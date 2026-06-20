@@ -20,8 +20,8 @@ echo [INFO] ROOT_DIR=%ROOT_DIR%
 echo [INFO] MODELS_ROOT=%MODELS_ROOT%
 echo [INFO] GGUF_PATH=%GGUF_PATH%
 
-if not exist "%ROOT_DIR%\bash\setup.bat" (
-  echo [ERROR] missing setup: %ROOT_DIR%\bash\setup.bat
+if not exist "%ROOT_DIR%\quickserver.py" (
+  echo [ERROR] missing quickserver entry: %ROOT_DIR%\quickserver.py
   exit /b 1
 )
 if not exist "%ROOT_DIR%\run_server.bat" (
@@ -56,7 +56,7 @@ if exist "%CLIENT_LOG%" del /f /q "%CLIENT_LOG%" >nul 2>nul
 
 echo [STEP] setup cpu
 set "KIMODO_TEST_SETUP_DEVICE=cpu"
-call "%ROOT_DIR%\bash\setup.bat" --output file --log "%SETUP_LOG%"
+call "%ROOT_DIR%\run_server.bat" setup --output file --log "%SETUP_LOG%"
 if errorlevel 1 (
   echo [ERROR] setup failed
   powershell -NoProfile -ExecutionPolicy Bypass -Command "if(Test-Path '%SETUP_LOG%'){ Get-Content '%SETUP_LOG%' -Tail 120 }"

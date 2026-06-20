@@ -1,6 +1,6 @@
 # NvlabKimodoQuickServer 参数说明
 
-## 1. `bash\setup.bat`
+## 1. `run_server.bat setup`
 - `--output <console|file>`: 输出模式，默认 `console`。
 - `--log <path>`: `file` 模式下日志文件路径，默认 `log\setup.log`。
 - `--force`: 强制重新 setup（会归档旧 sentinel）。
@@ -27,6 +27,7 @@
 说明：
 - 默认启动等待窗口约 `180s`（`1s * 180`）。
 - 不做 `serverport` 回填、不做 TCP 探活；`serverport` 仅由 bridge server 写入。
+- `run_server.bat setup` 也是同一条 Python 入口的子命令，用于单独执行 setup。
 
 ## 3. `example\example_run_server_tpose.bat`
 - 默认流程：后台启动 `run_server` -> 读取 `serverport` -> 发送 `ping/generate(tpose)/quit`。

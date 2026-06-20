@@ -66,7 +66,7 @@ if exist "%RUN_ROOT%\serverport" move "%RUN_ROOT%\serverport" "%RUN_ROOT%\archiv
 
 pushd "%RUN_ROOT%" >nul
 set "KIMODO_TEST_SETUP_DEVICE=cpu"
-call "%RUN_ROOT%\bash\setup.bat" --force --output file --log "%RUN_ROOT%\log\setup.log"
+call "%RUN_ROOT%\run_server.bat" setup --force --output file --log "%RUN_ROOT%\log\setup.log"
 set "RECOVER_SETUP_RC=%ERRORLEVEL%"
 popd >nul
 if not "%RECOVER_SETUP_RC%"=="0" goto fail_setup_recover

@@ -9,7 +9,7 @@ if not defined RESULT_FILE set "RESULT_FILE=%TEMP%\kimodo_case_uv_no_cache_%RAND
 set "RUN_ROOT=%ROOT_DIR%"
 set "TEST_BAT=%ROOT_DIR%\example\example_run_server_tpose.bat"
 set "TEST_MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
-set "SETUP_BAT=%ROOT_DIR%\bash\setup.bat"
+set "SETUP_BAT=%ROOT_DIR%\run_server.bat"
 set "SETUP_LOG=%ROOT_DIR%\log\setup.log"
 set "RECYCLE_DIR=%ROOT_DIR%\archive\recycle\case_uv_no_cache"
 set "LOCAL_VENV=%ROOT_DIR%\kimodo\.venv"
@@ -37,7 +37,7 @@ if errorlevel 1 (
 )
 
 pushd "%RUN_ROOT%" >nul
-call "%SETUP_BAT%" --force --output file --log "%SETUP_LOG%"
+call "%SETUP_BAT%" setup --force --output file --log "%SETUP_LOG%"
 set "SETUP_RC=%ERRORLEVEL%"
 popd >nul
 if not "%SETUP_RC%"=="0" (

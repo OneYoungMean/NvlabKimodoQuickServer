@@ -12,11 +12,6 @@ set "CASE_NAME=case_cpu_setup_and_run"
 set "RESULT_FILE=%~1"
 if not defined RESULT_FILE set "RESULT_FILE=%TEMP%\kimodo_case_cpu_setup_%RANDOM%%RANDOM%.txt"
 
-if not exist "%ROOT_DIR%\bash\setup.bat" (
-  echo [ERROR] setup.bat missing.
-  call :write_result FAIL setup_bat_missing
-  exit /b 1
-)
 if not exist "%ROOT_DIR%\run_server.bat" (
   echo [ERROR] run_server.bat missing.
   call :write_result FAIL run_server_bat_missing
@@ -35,7 +30,7 @@ call :archive_file "%SETUP_LOG%"
 
 echo [STEP] setup cpu mode...
 set "KIMODO_TEST_SETUP_DEVICE=cpu"
-call "%ROOT_DIR%\bash\setup.bat" --output file --log "%SETUP_LOG%"
+call "%ROOT_DIR%\run_server.bat" setup --output file --log "%SETUP_LOG%"
 if errorlevel 1 (
   echo [ERROR] setup cpu failed.
   if exist "%SETUP_LOG%" powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%SETUP_LOG%' -Tail 120"
