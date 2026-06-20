@@ -5,40 +5,7 @@
 - `--log <path>`: `file` 模式下日志文件路径，默认 `log\setup.log`。
 - `--force`: 强制重新 setup（会归档旧 sentinel）。
 
-相关环境变量：
-- `KIMODO_SETUP_BG=1`: 允许 setup 直出到当前控制台，不重定向到 `setup_buildenv_impl.log`。
-
-## 2. `bash\setup_buildenv_impl.bat`
-核心行为：
-- 仅使用本地 `program\exe\uv\uv.exe`。
-- 仅使用本地 `program\exe\git` 与 `git-lfs`。
-- 创建/复用 `kimodo\.venv` 并安装依赖。
-
-相关环境变量：
-- `KIMODO_NETWORK_FALLBACK_HEAD_TIMEOUT_SEC`: index 探测超时秒数，默认 `3`。
-- `KIMODO_PYTHON_ARCH`: 目前仅支持 x64；设为 `x86` 会直接报错退出。
-- `KIMODO_BUILDENV_ONLY=1`: 只构建环境不做额外流程。
-
-测试注入变量（默认关闭）：
-- `KIMODO_TEST_INJECT_SETUP_ABORT_ONCE=1`
-- `KIMODO_TEST_INJECT_SETUP_NET_BAD_ONCE=1`
-- `KIMODO_TEST_SCENARIO_NAME=<name>`
-
-## 3. `bash\download_model.bat`
-- 已收敛到 `python quickserver.py prepare-models` / `run_server.bat` 主流程，不再作为独立正式接口。
-- 模型下载默认走 ModelScope，失败即报错，不做 HF 兜底。
-
-相关环境变量：
-- `KIMODO_LLM2VEC_NF4_REPO_URL`
-- `KIMODO_META_LLAMA_REPO_URL`
-- `KIMODO_LLM2VEC_PEFT_REPO_URL`
-
-测试注入变量（默认关闭）：
-- `KIMODO_TEST_INJECT_DOWNLOAD_ABORT_ONCE=1`
-- `KIMODO_TEST_INJECT_DOWNLOAD_NET_BAD_ONCE=1`
-- `KIMODO_TEST_INJECT_MODEL_MISSING_AFTER_DOWNLOAD_ONCE=1`
-
-## 4. `run_server.bat`
+## 2. `run_server.bat`
 - `--model <name|alias>`: 默认 `Kimodo-SOMA-RP-v1`。
 - `--highvram`: 启用 high-vram 模式。
 - `--models-root <path>`: 指定外部模型根目录（存在即跳过下载流程）。
@@ -61,7 +28,7 @@
 - 默认启动等待窗口约 `180s`（`1s * 180`）。
 - 不做 `serverport` 回填、不做 TCP 探活；`serverport` 仅由 bridge server 写入。
 
-## 5. `example\example_run_server_tpose.bat`
+## 3. `example\example_run_server_tpose.bat`
 - 默认流程：后台启动 `run_server` -> 读取 `serverport` -> 发送 `ping/generate(tpose)/quit`。
 - 通过判定：客户端退出码 `0` 且出现 `status=done`。
 
@@ -73,7 +40,7 @@
 - `KIMODO_TEST_MODELS_ROOT=<path>`
 - `KIMODO_TEST_SERVER_WINDOW_STYLE=Normal|Hidden|Minimized|Maximized`
 
-## 6. 日志约定
+## 4. 日志约定
 - 默认所有日志写入 `log\`。
 - 典型文件：
   - `log\setup.log`
