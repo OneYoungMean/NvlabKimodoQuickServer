@@ -70,7 +70,7 @@ call :archive_file "%PORT_FILE%"
 call :archive_file "%PID_FILE%"
 if exist "!BRIDGE_SERVER_LOG!" call :archive_file "!BRIDGE_SERVER_LOG!"
 
-set "OWNER_PID_CMD=$ownerPidValue = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID) | Select-Object -ExpandProperty ParentProcessId); if(-not $ownerPidValue){ $ownerPidValue = $PID }"
+set "OWNER_PID_CMD=$ownerPidValue = $PID; try { $parentPidValue = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID) | Select-Object -ExpandProperty ParentProcessId); if($parentPidValue){ $ownerPidValue = $parentPidValue } } catch {}"
 set "LAUNCH_PS_CMD=$ErrorActionPreference='Stop'; %OWNER_PID_CMD%; $args=@('/d','/c','!LAUNCHER!','--model','%MODEL%','--watchpid',[string]$ownerPidValue);"
 if defined DEVICE call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--device','%DEVICE%');"
 if defined MODELS_ROOT call set "LAUNCH_PS_CMD=%%LAUNCH_PS_CMD%% $args += @('--models-root','%MODELS_ROOT%');"

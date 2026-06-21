@@ -9,45 +9,23 @@ Persistent process for Unity Editor:
 """
 
 import argparse
-from collections import deque
 import json
 import os
-import platform
-import shutil
 import socket
-import subprocess
 import sys
-import tarfile
 import threading
 import time
 import traceback
-import urllib.error
-import urllib.request
-import zipfile
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
-from kimodo.bridge.quickserver_assets import (
-    FULL_BASE_LOCAL_DIR,
-    FULL_PEFT_LOCAL_DIR,
-    GGUF_LOCAL_DIR,
-    NF4_LOCAL_DIR,
-    default_gguf_model_path,
-)
 
 
 def _default_bridge_log_path(root: str) -> str:
     if not root:
         return ""
     return os.path.join(root, "log", "bridge_server.log")
-
-
-def _default_gguf_model_path(root: str) -> str:
-    if not root:
-        return ""
-    return default_gguf_model_path(os.path.join(root, "models"))
 
 
 def _detect_total_vram_gb() -> float:
@@ -122,348 +100,6 @@ def _log(msg: str):
             f.write(line + "\n")
     except Exception:
         pass
-
-
-# Pinned llama.cpp release used when a local llama-server binary is missing.
-# Bump this (and verify the asset names below still exist for that tag) to upgrade.
-# Release assets: https://github.com/ggml-org/llama.cpp/releases
-_LLAMA_CPP_RELEASE_TAG = "b9644"
-
-# Map (system, machine) -> release asset basename for the CPU build of that tag.
-# We use CPU builds intentionally: llama-server here only serves text-embedding
-# inference, and the bundled Windows binaries are CPU-only as well.
-def _llama_asset_name(tag: str) -> str:
-    system = platform.system()
-    machine = platform.machine().lower()
-    is_arm = machine in ("arm64", "aarch64")
-    if system == "Windows":
-        return f"llama-{tag}-bin-win-cpu-{'arm64' if is_arm else 'x64'}.zip"
-    if system == "Linux":
-        return f"llama-{tag}-bin-ubuntu-{'arm64' if is_arm else 'x64'}.tar.gz"
-    if system == "Darwin":
-        return f"llama-{tag}-bin-macos-{'arm64' if is_arm else 'x64'}.tar.gz"
-    raise RuntimeError(f"Unsupported platform for llama.cpp download: {system}/{machine}")
-
-
-class LlamaServiceManager:
-    def __init__(self, kimodo_root: str, gguf_model_path: str, ctx_size: int, startup_timeout_sec: int):
-        self.kimodo_root = os.path.abspath(kimodo_root)
-        self.gguf_model_path = gguf_model_path
-        self.ctx_size = int(ctx_size)
-        self.startup_timeout_sec = int(startup_timeout_sec)
-        self.process: subprocess.Popen | None = None
-        self.port: int = 0
-        self.base_url: str = ""
-        self.model_file: str = ""
-        self.embedding_model: str = os.environ.get("KIMODO_GGUF_EMBED_MODEL", "default").strip() or "default"
-        self._tail_logs: deque[str] = deque(maxlen=120)
-        self._pipe_threads: list[threading.Thread] = []
-
-    def _append_tail(self, line: str) -> None:
-        text = str(line).strip()
-        if text:
-            self._tail_logs.append(text)
-
-    def _tail_summary(self, limit: int = 20) -> str:
-        if not self._tail_logs:
-            return ""
-        tail = list(self._tail_logs)[-max(1, int(limit)) :]
-        return " | ".join(tail)
-
-    def _pipe_pump(self, stream, stream_name: str) -> None:
-        try:
-            for raw in iter(stream.readline, ""):
-                line = raw.rstrip("\r\n")
-                if not line:
-                    continue
-                self._append_tail(f"{stream_name}: {line}")
-                _log(f"[llama][{stream_name}] {line}")
-        except Exception as exc:
-            self._append_tail(f"{stream_name}-pump-error: {exc}")
-            _log(f"[llama] {stream_name} pump error: {exc}")
-        finally:
-            try:
-                stream.close()
-            except Exception:
-                pass
-
-    def _resolve_llama_server_exe(self) -> str:
-        exe_name = "llama-server.exe" if os.name == "nt" else "llama-server"
-        llama_dir = os.path.join(self.kimodo_root, "program", "exe", "llama")
-        candidates = [
-            os.path.join(llama_dir, exe_name),
-            os.path.join(llama_dir, "bin", exe_name),
-        ]
-        for cand in candidates:
-            if os.path.isfile(cand):
-                return os.path.abspath(cand)
-        # Not found locally. Download the pinned llama.cpp build for this platform.
-        # This is the cross-platform provisioning path: the Windows .bat setup ships
-        # binaries for Windows, but Linux/macOS have no .bat, so they land here.
-        _log(
-            f"[llama] no local llama-server in {llama_dir}; "
-            f"downloading llama.cpp {_LLAMA_CPP_RELEASE_TAG} for this platform..."
-        )
-        self._download_llama_server(llama_dir)
-        for cand in candidates:
-            if os.path.isfile(cand):
-                return os.path.abspath(cand)
-        raise FileNotFoundError(
-            "llama-server executable not found after download attempt. "
-            f"Expected one of: {candidates}"
-        )
-
-    def _download_llama_server(self, llama_dir: str) -> None:
-        asset = _llama_asset_name(_LLAMA_CPP_RELEASE_TAG)
-        url = (
-            "https://github.com/ggml-org/llama.cpp/releases/download/"
-            f"{_LLAMA_CPP_RELEASE_TAG}/{asset}"
-        )
-        os.makedirs(llama_dir, exist_ok=True)
-        archive_path = os.path.join(llama_dir, asset)
-        _log(f"[llama] downloading {url}")
-        try:
-            with urllib.request.urlopen(url, timeout=120) as resp, open(archive_path, "wb") as out:
-                shutil.copyfileobj(resp, out)
-        except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Failed to download llama.cpp asset {asset} from {url}: {exc}"
-            ) from exc
-        try:
-            self._extract_llama_archive(archive_path, llama_dir)
-        finally:
-            try:
-                os.remove(archive_path)
-            except OSError:
-                pass
-        # llama.cpp archives are flat or nested under a single top-level dir; some
-        # builds place binaries under build/bin/. Flatten so candidates resolve.
-        self._flatten_llama_dir(llama_dir)
-        # Ensure the server binary is executable on POSIX (zip/tar may drop the bit).
-        if os.name != "nt":
-            server = os.path.join(llama_dir, "llama-server")
-            if os.path.isfile(server):
-                os.chmod(server, 0o755)
-
-    @staticmethod
-    def _extract_llama_archive(archive_path: str, dest_dir: str) -> None:
-        if archive_path.endswith(".zip"):
-            with zipfile.ZipFile(archive_path) as zf:
-                zf.extractall(dest_dir)
-        else:
-            with tarfile.open(archive_path, "r:gz") as tf:
-                tf.extractall(dest_dir)
-
-    @staticmethod
-    def _flatten_llama_dir(llama_dir: str) -> None:
-        # Find llama-server anywhere under llama_dir and move every file from its
-        # directory up to llama_dir, so _resolve_llama_server_exe finds it directly.
-        server_names = ("llama-server", "llama-server.exe")
-        found_dir = None
-        for root, _dirs, files in os.walk(llama_dir):
-            if root == llama_dir:
-                continue
-            if any(name in files for name in server_names):
-                found_dir = root
-                break
-        if not found_dir:
-            return
-        for name in os.listdir(found_dir):
-            src = os.path.join(found_dir, name)
-            dst = os.path.join(llama_dir, name)
-            if os.path.abspath(src) == os.path.abspath(dst):
-                continue
-            if os.path.exists(dst):
-                if os.path.isdir(dst):
-                    shutil.rmtree(dst, ignore_errors=True)
-                else:
-                    os.remove(dst)
-            shutil.move(src, dst)
-
-    def _resolve_gguf_file(self) -> str:
-        raw_path = (self.gguf_model_path or "").strip()
-        if not raw_path:
-            raise ValueError("KIMODO_GGUF_MODEL_PATH is empty.")
-        return os.path.abspath(raw_path)
-
-    def _pick_free_port(self) -> int:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", 0))
-            return int(s.getsockname()[1])
-
-    def _embedding_healthcheck(self) -> tuple[bool, str]:
-        def has_embedding(payload_obj: Any) -> bool:
-            if isinstance(payload_obj, dict):
-                data = payload_obj.get("data")
-                if isinstance(data, list) and len(data) > 0:
-                    first = data[0]
-                    if isinstance(first, dict):
-                        emb = first.get("embedding")
-                        return isinstance(emb, list) and len(emb) > 0
-                    if isinstance(first, list):
-                        return len(first) > 0
-                emb = payload_obj.get("embedding")
-                if isinstance(emb, list) and len(emb) > 0:
-                    return True
-                return False
-            if isinstance(payload_obj, list) and len(payload_obj) > 0:
-                first = payload_obj[0]
-                if isinstance(first, (int, float)):
-                    return True
-                if isinstance(first, list) and len(first) > 0:
-                    return True
-                if isinstance(first, dict):
-                    emb = first.get("embedding")
-                    return isinstance(emb, list) and len(emb) > 0
-            return False
-
-        endpoints = ["/v1/embeddings", "/embeddings"]
-        payloads = [
-            {"model": self.embedding_model, "input": "kimodo-healthcheck"},
-            {"model": self.embedding_model, "input": ["kimodo-healthcheck"]},
-            {"input": "kimodo-healthcheck"},
-            {"input": ["kimodo-healthcheck"]},
-        ]
-        last_error = "unknown"
-        for ep in endpoints:
-            for body in payloads:
-                payload = json.dumps(body).encode("utf-8")
-                req = urllib.request.Request(
-                    f"{self.base_url}{ep}",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=5) as resp:
-                        text = resp.read().decode("utf-8", errors="replace")
-                except Exception as exc:
-                    last_error = f"{ep} {type(exc).__name__}: {exc}"
-                    continue
-                try:
-                    obj = json.loads(text)
-                except Exception as exc:
-                    last_error = f"{ep} invalid-json: {exc}"
-                    continue
-                if has_embedding(obj):
-                    return True, "ok"
-                last_error = f"{ep} unexpected-embedding-response: {obj}"
-        return False, last_error
-
-    def _start_with_flag(self, embedding_flag: str) -> None:
-        exe = self._resolve_llama_server_exe()
-        self.model_file = self._resolve_gguf_file()
-        self.port = self._pick_free_port()
-        self.base_url = f"http://127.0.0.1:{self.port}"
-        cmd = [
-            exe,
-            "-m",
-            self.model_file,
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(self.port),
-            embedding_flag,
-        ]
-        if self.ctx_size > 0:
-            cmd.extend(["--ctx-size", str(self.ctx_size)])
-
-        _log(
-            "[llama] launch cmd="
-            + " ".join([f'"{x}"' if " " in x else x for x in cmd])
-        )
-        self._tail_logs.clear()
-        self._pipe_threads = []
-        self.process = subprocess.Popen(
-            cmd,
-            cwd=os.path.dirname(exe),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-        if self.process.stdout is not None:
-            t = threading.Thread(
-                target=self._pipe_pump, args=(self.process.stdout, "stdout"), daemon=True
-            )
-            t.start()
-            self._pipe_threads.append(t)
-        if self.process.stderr is not None:
-            t = threading.Thread(
-                target=self._pipe_pump, args=(self.process.stderr, "stderr"), daemon=True
-            )
-            t.start()
-            self._pipe_threads.append(t)
-
-        deadline = time.time() + float(self.startup_timeout_sec)
-        last_error = "starting"
-        while time.time() < deadline:
-            if self.process is None:
-                last_error = "process-not-created"
-                break
-            rc = self.process.poll()
-            if rc is not None:
-                tail = self._tail_summary()
-                if tail:
-                    last_error = f"llama-server exited early with code {rc}; tail={tail}"
-                else:
-                    last_error = f"llama-server exited early with code {rc}"
-                break
-            ok, msg = self._embedding_healthcheck()
-            if ok:
-                _log(
-                    f"[llama] ready port={self.port} model={self.model_file} "
-                    f"ctx={self.ctx_size}"
-                )
-                return
-            last_error = msg
-            time.sleep(1.0)
-
-        self.stop()
-        tail = self._tail_summary()
-        if tail:
-            last_error = f"{last_error}; tail={tail}"
-        raise RuntimeError(
-            f"llama-server did not become healthy in {self.startup_timeout_sec}s: {last_error}"
-        )
-
-    def start(self) -> None:
-        if self.process is not None:
-            return
-
-        startup_errors: list[str] = []
-        for flag in ("--embeddings", "--embedding"):
-            try:
-                self._start_with_flag(flag)
-                return
-            except Exception as exc:
-                startup_errors.append(f"{flag}: {exc}")
-                _log(f"[llama] startup failed with {flag}: {exc}")
-        raise RuntimeError(" ; ".join(startup_errors))
-
-    def stop(self) -> None:
-        proc = self.process
-        self.process = None
-        if proc is None:
-            return
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=5)
-            for t in self._pipe_threads:
-                try:
-                    t.join(timeout=0.5)
-                except Exception:
-                    pass
-            _log(f"[llama] stopped rc={proc.returncode}")
-        except Exception as exc:
-            _log(f"[llama] stop error: {exc}")
 
 
 def _rotation_mats_to_quat_wxyz(rot_mats: np.ndarray) -> np.ndarray:
@@ -729,7 +365,6 @@ def main():
     active_command_lock = threading.Lock()
     quitting = False
     quitting_lock = threading.Lock()
-    llama_service: LlamaServiceManager | None = None
 
     def _set_loading_message(message: str):
         with state_lock:
@@ -772,20 +407,11 @@ def main():
             return
 
         # --- Three-tier VRAM detection ---
-        # <2 GB total  → kimodo on CPU, text encoder via llama.cpp GGUF
-        # >=2 GB & <6 GB → kimodo on cuda:0, text encoder via llama.cpp GGUF
-        # >=6 GB        → kimodo on cuda:0, text encoder via local LLM2Vec (existing)
+        # <2 GB total       → kimodo on CPU, text encoder via local Torch INT8
+        # >=2 GB & <6 GB    → kimodo on cuda:0, text encoder via local Torch INT8
+        # >=6 GB            → kimodo on cuda:0, text encoder via local LLM2Vec
         total_vram_gb = _detect_total_vram_gb()
         _log(f"[bridge] detected total VRAM: {total_vram_gb:.2f} GB")
-
-        # Determine whether to use GGUF encoder.  User override wins.
-        force_gguf_env = os.environ.get("KIMODO_FORCE_GGUF", "").strip()
-        if force_gguf_env == "1":
-            use_gguf_encoder = True
-        elif force_gguf_env == "0":
-            use_gguf_encoder = False
-        else:
-            use_gguf_encoder = total_vram_gb < 6.0
 
         # Determine kimodo device.
         if args.device:
@@ -802,44 +428,21 @@ def main():
             else:
                 device = "cuda:0"
 
-        _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} use_gguf_encoder={use_gguf_encoder}")
+        use_int8_encoder = str(device).lower() == "cpu" or total_vram_gb < 6.0
 
-        # Start llama.cpp GGUF text-encoder service when selected.
-        if use_gguf_encoder:
-            try:
-                gguf_path = os.environ.get("KIMODO_GGUF_MODEL_PATH", "").strip()
-                if not gguf_path:
-                    gguf_path = _default_gguf_model_path(kimodo_root)
-                gguf_ctx = int(os.environ.get("KIMODO_GGUF_CTX", "4096"))
-                gguf_timeout = int(os.environ.get("KIMODO_GGUF_STARTUP_TIMEOUT_SEC", "120"))
-                nonlocal llama_service
-                llama_service = LlamaServiceManager(
-                    kimodo_root=kimodo_root,
-                    gguf_model_path=gguf_path,
-                    ctx_size=gguf_ctx,
-                    startup_timeout_sec=gguf_timeout,
-                )
-                llama_service.start()
-                os.environ["TEXT_ENCODER_MODE"] = "api"
-                os.environ["TEXT_ENCODER_API_BACKEND"] = "llama"
-                os.environ["TEXT_ENCODER_URL"] = llama_service.base_url
-                os.environ["KIMODO_CPU_TEXT_ENCODER"] = "gguf"
-                # Prevent local LLM2Vec from loading onto GPU unnecessarily.
-                os.environ["TEXT_ENCODER_DEVICE"] = "cpu"
-                _log(
-                    f"[bridge] gguf text encoder enabled (tier: vram<6G). "
-                    f"url={llama_service.base_url} model={llama_service.model_file}"
-                )
-            except Exception as exc:
-                with state_lock:
-                    state["error"] = f"Failed to start llama text-encoder service: {exc}"
-                    state["loading"] = False
-                _log(f"[bridge] llama startup error {exc}")
-                return
-        else:
-            # >=6G tier: use local LLM2Vec directly, skip the auto-mode API probe
-            # which would waste time trying to reach a non-existent port 9550.
+        _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} use_int8_encoder={use_int8_encoder}")
+
+        if use_int8_encoder:
+            os.environ["TEXT_ENCODER"] = "llm2vec_int8"
             os.environ["TEXT_ENCODER_MODE"] = "local"
+            os.environ["KIMODO_CPU_TEXT_ENCODER"] = "int8"
+            os.environ["TEXT_ENCODER_DEVICE"] = "cpu"
+            _log("[bridge] local INT8 text encoder selected (tier: vram<6G).")
+        else:
+            # >=6G tier: use local LLM2Vec directly.
+            os.environ["TEXT_ENCODER"] = "llm2vec"
+            os.environ["TEXT_ENCODER_MODE"] = "local"
+            os.environ["TEXT_ENCODER_DEVICE"] = "auto"
             _log("[bridge] local LLM2Vec text encoder selected (tier: vram>=6G).")
         _set_loading_message(f"Loading {args.model} on {device}...")
         _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
@@ -1041,11 +644,6 @@ def main():
                     except (ConnectionResetError, BrokenPipeError, OSError):
                         break
     finally:
-        try:
-            if llama_service is not None:
-                llama_service.stop()
-        except Exception:
-            pass
         try:
             server.close()
         except Exception:

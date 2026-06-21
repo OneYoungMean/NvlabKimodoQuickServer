@@ -9,10 +9,17 @@ from typing import Protocol
 
 
 DEFAULT_MODEL_NAME = "Kimodo-SOMA-RP-v1"
-GGUF_LOCAL_DIR = "KIMODO-Meta3_llm2vec_FP16-Q6_K"
+INT8_LOCAL_DIR = "KIMODO-Meta3_llm2vec_INT8"
 NF4_LOCAL_DIR = "KIMODO-Meta3_llm2vec_NF4"
 FULL_BASE_LOCAL_DIR = "Meta-Llama-3-8B-Instruct"
 FULL_PEFT_LOCAL_DIR = "LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"
+LEGACY_GGUF_ENV_VARS = (
+    "KIMODO_GGUF_MODEL_PATH",
+    "KIMODO_GGUF_CTX",
+    "KIMODO_GGUF_STARTUP_TIMEOUT_SEC",
+    "KIMODO_GGUF_EMBED_MODEL",
+    "KIMODO_FORCE_GGUF",
+)
 
 
 class LoggerLike(Protocol):
@@ -48,7 +55,7 @@ class RuntimeHints:
     normalized_device: str | None
     setup_mode: str
     text_encoder_device_hint: str
-    explicit_cpu_gguf: bool
+    cpu_text_encoder: str
 
 
 MAIN_MODELS: tuple[MainModelSpec, ...] = (
@@ -94,11 +101,11 @@ MAIN_MODELS: tuple[MainModelSpec, ...] = (
     ),
 )
 
-GGUF_ASSET = AssetSpec(
-    label="GGUF text encoder",
-    local_dir_name=GGUF_LOCAL_DIR,
-    modelscope_repo="oneyoungmean/KIMODO-Meta3_llm2vec_FP16-Q6_K",
-    huggingface_repo="oneyoungmean/KIMODO-Meta3_llm2vec_FP16-Q6_K",
+INT8_ASSET = AssetSpec(
+    label="INT8 text encoder",
+    local_dir_name=INT8_LOCAL_DIR,
+    modelscope_repo="oneyoungmean/KIMODO-Meta3_llm2vec_INT8",
+    huggingface_repo="oneyoungmean/KIMODO-Meta3_llm2vec_INT8",
 )
 NF4_ASSET = AssetSpec(
     label="NF4 text encoder",
@@ -143,11 +150,34 @@ def resolve_main_model(requested_name: str | None) -> ResolvedModel:
     raise ValueError(f"Unsupported model alias: {raw_name}")
 
 
+def validate_cpu_text_encoder(cpu_text_encoder: str | None) -> str:
+    normalized = str(cpu_text_encoder or "int8").strip().lower() or "int8"
+    if normalized == "gguf":
+        raise ValueError(
+            "GGUF text encoder route has been removed. "
+            "Use --cpu-text-encoder int8 (or KIMODO_CPU_TEXT_ENCODER=int8)."
+        )
+    if normalized != "int8":
+        raise ValueError(f"Unsupported --cpu-text-encoder value: {cpu_text_encoder!r}. Only 'int8' is supported.")
+    return normalized
+
+
+def assert_no_legacy_gguf_env() -> None:
+    active = [name for name in LEGACY_GGUF_ENV_VARS if os.environ.get(name, "").strip()]
+    if active:
+        raise ValueError(
+            "Legacy GGUF environment variables are no longer supported: "
+            + ", ".join(active)
+        )
+
+
 def normalize_runtime_hints(run_device: str | None, cpu_text_encoder: str) -> RuntimeHints:
     normalized_device: str | None = None
     setup_mode = "auto"
     text_encoder_device_hint = "auto"
-    explicit_cpu_gguf = False
+    normalized_cpu_encoder = validate_cpu_text_encoder(cpu_text_encoder)
+    assert_no_legacy_gguf_env()
+
     raw_device = str(run_device or "").strip()
     if raw_device:
         lowered = raw_device.lower()
@@ -155,7 +185,6 @@ def normalize_runtime_hints(run_device: str | None, cpu_text_encoder: str) -> Ru
             normalized_device = "cpu"
             setup_mode = "cpu"
             text_encoder_device_hint = "cpu"
-            explicit_cpu_gguf = str(cpu_text_encoder or "").strip().lower() == "gguf"
         elif lowered == "cuda":
             normalized_device = "cuda:0"
         elif lowered.startswith("cuda"):
@@ -166,7 +195,7 @@ def normalize_runtime_hints(run_device: str | None, cpu_text_encoder: str) -> Ru
         normalized_device=normalized_device,
         setup_mode=setup_mode,
         text_encoder_device_hint=text_encoder_device_hint,
-        explicit_cpu_gguf=explicit_cpu_gguf,
+        cpu_text_encoder=normalized_cpu_encoder,
     )
 
 
@@ -182,22 +211,17 @@ def detect_total_vram_gb() -> float:
     return 0.0
 
 
-def should_use_gguf(total_vram_gb: float, force_override: str | None = None) -> bool:
-    normalized = str(force_override or "").strip()
-    if normalized == "1":
-        return True
-    if normalized == "0":
-        return False
+def should_use_int8(total_vram_gb: float) -> bool:
     return float(total_vram_gb) < 6.0
 
 
 def choose_prepare_encoder_route(highvram: bool, hints: RuntimeHints, total_vram_gb: float | None = None) -> str:
-    if hints.explicit_cpu_gguf:
-        return "gguf"
+    if hints.normalized_device == "cpu":
+        return "int8"
     if total_vram_gb is None:
         total_vram_gb = detect_total_vram_gb()
-    if should_use_gguf(total_vram_gb):
-        return "gguf"
+    if should_use_int8(total_vram_gb):
+        return "int8"
     return "full" if highvram else "nf4"
 
 
@@ -214,18 +238,6 @@ def resolve_models_root(root_dir: str | os.PathLike[str], models_root_arg: str |
     else:
         models_root = models_root.resolve()
     return models_root, models_root != default_models_root(root)
-
-
-def default_gguf_model_path(models_root: str | os.PathLike[str]) -> str:
-    return str((Path(models_root).resolve() / GGUF_LOCAL_DIR / f"{GGUF_LOCAL_DIR}.gguf").resolve())
-
-
-def locate_gguf_file(model_dir: str | os.PathLike[str]) -> Path:
-    return Path(model_dir).resolve() / f"{GGUF_LOCAL_DIR}.gguf"
-
-
-def gguf_ready_path(models_root: str | os.PathLike[str]) -> Path:
-    return Path(default_gguf_model_path(models_root))
 
 
 def local_model_dir(models_root: str | os.PathLike[str], resolved_model: ResolvedModel) -> Path:
@@ -266,15 +278,79 @@ def should_inject_once(recovery_flag_dir: Path, key: str, env_var: str) -> bool:
     return True
 
 
+def _has_any_file(model_dir: Path, filenames: tuple[str, ...]) -> bool:
+    return any((model_dir / filename).is_file() for filename in filenames)
+
+
+def _has_weight_file(model_dir: Path) -> bool:
+    patterns = ("*.safetensors", "*.bin")
+    return any(any(model_dir.glob(pattern)) for pattern in patterns)
+
+
+def _main_model_ready(model_dir: Path) -> bool:
+    return (model_dir / "config.yaml").is_file()
+
+
+def _llm2vec_ready(model_dir: Path) -> bool:
+    return (
+        (model_dir / "config.json").is_file()
+        and (model_dir / "tokenizer_config.json").is_file()
+        and _has_any_file(model_dir, ("tokenizer.json", "tokenizer.model"))
+        and _has_weight_file(model_dir)
+    )
+
+
+def _int8_ready(model_dir: Path) -> bool:
+    return (
+        (model_dir / "config.json").is_file()
+        and (model_dir / "tokenizer_config.json").is_file()
+        and _has_any_file(model_dir, ("tokenizer.json", "tokenizer.model"))
+        and (model_dir / "llm2vec_config.json").is_file()
+        and (model_dir / "quantized_state_dict.pt").is_file()
+        and (model_dir / "quantization_meta.json").is_file()
+    )
+
+
+def _full_peft_ready(model_dir: Path) -> bool:
+    return (
+        (model_dir / "adapter_config.json").is_file()
+        and _has_any_file(model_dir, ("adapter_model.safetensors", "adapter_model.bin", "model.safetensors", "pytorch_model.bin"))
+    )
+
+
+def asset_is_ready(asset: AssetSpec, target_dir: Path) -> bool:
+    if asset.label == "main model":
+        return _main_model_ready(target_dir)
+    if asset.local_dir_name == INT8_LOCAL_DIR:
+        return _int8_ready(target_dir)
+    if asset.local_dir_name == NF4_LOCAL_DIR:
+        return _llm2vec_ready(target_dir)
+    if asset.local_dir_name == FULL_BASE_LOCAL_DIR:
+        return _llm2vec_ready(target_dir)
+    if asset.local_dir_name == FULL_PEFT_LOCAL_DIR:
+        return _full_peft_ready(target_dir)
+    return target_dir.exists()
+
+
 def ensure_asset_present(
     asset: AssetSpec,
     target_dir: Path,
     logger: LoggerLike,
     recovery_flag_dir: Path,
     download_counter: list[int],
+    *,
+    allow_download: bool = True,
 ) -> None:
+    if asset_is_ready(asset, target_dir):
+        logger.log(f"[OK] {asset.label} already present: {target_dir}")
+        return
+
+    if not allow_download:
+        raise RuntimeError(f"Missing required {asset.label}: {target_dir}")
+
     if should_inject_once(recovery_flag_dir, "download_net_bad", "KIMODO_TEST_INJECT_DOWNLOAD_NET_BAD_ONCE"):
         raise RuntimeError("Injected download network failure once.")
+
     logger.log(f"[STEP] Downloading {asset.label}: {asset.local_dir_name}")
     target_dir.mkdir(parents=True, exist_ok=True)
     if not asset.modelscope_repo:
@@ -287,6 +363,9 @@ def ensure_asset_present(
     except Exception as exc:
         raise RuntimeError(f"Failed to download {asset.label} via ModelScope: {exc}") from exc
 
+    if not asset_is_ready(asset, target_dir):
+        raise RuntimeError(f"Downloaded asset is incomplete: {target_dir}")
+
     logger.log(f"[OK] {asset.label} ready via ModelScope: {asset.modelscope_repo}")
     download_counter[0] += 1
     if should_inject_once(recovery_flag_dir, "download_abort", "KIMODO_TEST_INJECT_DOWNLOAD_ABORT_ONCE"):
@@ -297,37 +376,38 @@ def build_runtime_env(
     root_dir: str | os.PathLike[str],
     source_root: str | os.PathLike[str],
     models_root: str | os.PathLike[str],
+    encoder_route: str,
     highvram: bool,
     hints: RuntimeHints,
     cpu_text_encoder: str,
-    gguf_model_path: str | None,
-    gguf_ctx: str | None,
 ) -> dict[str, str]:
     root = Path(root_dir).resolve()
     models_path = Path(models_root).resolve()
+    normalized_cpu_encoder = validate_cpu_text_encoder(cpu_text_encoder)
+
     env: dict[str, str] = {
         "PYTHONPATH": str(Path(source_root).resolve()),
         "KIMODO_ROOT_PATH": str(root),
         "CHECKPOINT_DIR": str(models_path),
         "LOCAL_CACHE": "true",
-        "TEXT_ENCODER": "llm2vec",
-        "KIMODO_CPU_TEXT_ENCODER": str(cpu_text_encoder or "gguf"),
-        "KIMODO_GGUF_MODEL_PATH": str(gguf_model_path or default_gguf_model_path(models_path)),
+        "TEXT_ENCODER": "llm2vec_int8" if encoder_route == "int8" else "llm2vec",
+        "KIMODO_CPU_TEXT_ENCODER": normalized_cpu_encoder,
     }
     if hints.text_encoder_device_hint:
         env["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = hints.text_encoder_device_hint
-    if gguf_ctx:
-        env["KIMODO_GGUF_CTX"] = str(gguf_ctx)
-    if highvram:
+
+    if encoder_route == "full" and highvram:
         env["KIMODO_LLM2VEC_DIR"] = str(models_path / FULL_BASE_LOCAL_DIR)
         env["TEXT_ENCODERS_DIR"] = str(models_path)
         env["KIMODO_LLM2VEC_PEFT_DIR"] = str(models_path / FULL_PEFT_LOCAL_DIR)
-    else:
+    elif encoder_route == "nf4":
         env["KIMODO_LLM2VEC_DIR"] = str(models_path / NF4_LOCAL_DIR)
         env["TEXT_ENCODERS_DIR"] = ""
         env["KIMODO_LLM2VEC_PEFT_DIR"] = ""
-    if hints.explicit_cpu_gguf:
-        env["KIMODO_FORCE_GGUF"] = "1"
+    else:
+        env["KIMODO_LLM2VEC_DIR"] = str(models_path / INT8_LOCAL_DIR)
+        env["TEXT_ENCODERS_DIR"] = ""
+        env["KIMODO_LLM2VEC_PEFT_DIR"] = ""
     return env
 
 

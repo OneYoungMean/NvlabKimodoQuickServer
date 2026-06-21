@@ -11,12 +11,20 @@
 - `--models-root <path>`: 指定外部模型根目录（存在即跳过下载流程）。
 - `--output <console|file>`: 输出模式，默认 `console`。
 - `--log <path>`: `file` 模式下主日志路径，默认 `log\bridge_server.log`。
+- `--cpu-text-encoder <int8>`: CPU / 低显存路径使用的文本编码器，默认 `int8`。`gguf` 已废弃并会直接报错。
 - `bridge_server` 主日志固定为 `log\bridge_server.log`。
 - `--force-setup`: 归档 setup sentinel 后重新 setup。
 
 关键运行变量：
 - `KIMODO_MODELS_ROOT`: 默认 models 根目录（可被 `--models-root` 覆盖）。
+- `KIMODO_CPU_TEXT_ENCODER=int8`: 指定 CPU 文本编码器路线，当前仅支持 `int8`。
 - `KIMODO_IDLE_TIMEOUT_SEC`: 服务空闲退出秒数（当前设定 `600`）。
+
+INT8 资产说明：
+- 默认低显存文本编码器目录为 `models\KIMODO-Meta3_llm2vec_INT8`。
+- 若本地已有 `C:\nvlab\LLMVec-GGUF\KIMODO-Meta3_llm2vec_FP16`，可先执行 `tools\build_llm2vec_int8.py` 生成 INT8 资产。
+- 对默认 `models\` 目录：若缺少 INT8 资产，会尝试从 `oneyoungmean/KIMODO-Meta3_llm2vec_INT8` 下载。
+- 对外部 `--models-root`：不会自动下载，缺失时直接报错。
 
 ### 启动与 watchdog
 - `KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC`: 启动阶段等待 `serverport` 的轮询间隔（默认 `1` 秒）。

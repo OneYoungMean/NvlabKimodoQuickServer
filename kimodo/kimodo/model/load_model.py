@@ -30,7 +30,14 @@ TEXT_ENCODER_PRESETS = {
             "llm_dim": 4096,
             #"device": "auto",
         },
-    }
+    },
+    "llm2vec_int8": {
+        "target": "kimodo.model.LLM2VecInt8Encoder",
+        "kwargs": {
+            "model_name_or_path": "KIMODO-Meta3_llm2vec_INT8",
+            "llm_dim": 4096,
+        },
+    },
 }
 
 
@@ -78,11 +85,12 @@ def _build_local_text_encoder_conf(text_encoder_fp32: bool = False) -> dict:
         raise ValueError(f"Unknown TEXT_ENCODER='{text_encoder_name}'. Available: {available}")
 
     preset = TEXT_ENCODER_PRESETS[text_encoder_name]
-    if text_encoder_fp32:
-        preset["kwargs"]["dtype"] = "float32"
+    kwargs = dict(preset["kwargs"])
+    if text_encoder_fp32 and "dtype" in kwargs:
+        kwargs["dtype"] = "float32"
     return {
         "_target_": preset["target"],
-        **preset["kwargs"],
+        **kwargs,
     }
 
 

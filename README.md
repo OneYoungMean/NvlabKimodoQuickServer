@@ -1,4 +1,4 @@
-# NvlabKimodoQuickServer
+# NvlabKimodoQuickServer1
 
 ## Language
 - Chinese: `README_ZH.md`
@@ -19,15 +19,23 @@
 
 ## Install
 ```bat
-cd /d C:\nvlab\NvlabKimodoQuickServer
+cd /d C:\nvlab\NvlabKimodoQuickServer1
 run_server.bat setup --output console
+```
+
+If you already have a baked FP16 text encoder at `C:\nvlab\LLMVec-GGUF\KIMODO-Meta3_llm2vec_FP16`, you can build the local CPU INT8 asset first:
+```bat
+cd /d C:\nvlab\NvlabKimodoQuickServer1
+program\exe\uv\uv.exe run --python 3.12 --no-project python tools\build_llm2vec_int8.py --verify
 ```
 
 ## Example
 ```bat
-cd /d C:\nvlab\NvlabKimodoQuickServer
+cd /d C:\nvlab\NvlabKimodoQuickServer1
 run_server.bat --model Kimodo-SOMA-RP-v1 --models-root C:\nvlab\models~ --output console
 ```
+
+Low-VRAM runs now use the local Torch CPU INT8 text encoder asset under `models\KIMODO-Meta3_llm2vec_INT8` by default.
 
 TCP smoke test:
 ```bat

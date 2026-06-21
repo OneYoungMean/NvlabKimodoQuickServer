@@ -5,8 +5,8 @@ import dataclasses
 from dataclasses import dataclass
 import ctypes
 import os
-import signal
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -27,7 +27,6 @@ class PrepareResult:
     using_external_models: bool
     runtime_hints: assets.RuntimeHints
     encoder_route: str
-    gguf_model_path: str | None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -43,7 +42,7 @@ def _build_parser() -> argparse.ArgumentParser:
         run_parser.add_argument("--venv")
         run_parser.add_argument("--device")
         run_parser.add_argument("--force-setup", action="store_true")
-        run_parser.add_argument("--cpu-text-encoder", default=os.environ.get("KIMODO_CPU_TEXT_ENCODER", "gguf"))
+        run_parser.add_argument("--cpu-text-encoder", default=os.environ.get("KIMODO_CPU_TEXT_ENCODER", "int8"))
         run_parser.add_argument("--watchpid")
         run_parser.add_argument("--config-only", action="store_true")
         run_parser.add_argument("--unlock-stale", action="store_true")
@@ -89,6 +88,14 @@ def _prepare_logger(
     return SetupLogger(output_mode, final_log_path, append=append)
 
 
+def _required_encoder_assets(encoder_route: str) -> list[assets.AssetSpec]:
+    if encoder_route == "int8":
+        return [assets.INT8_ASSET]
+    if encoder_route == "full":
+        return [assets.FULL_BASE_ASSET, assets.FULL_PEFT_ASSET]
+    return [assets.NF4_ASSET]
+
+
 def _prepare_models(paths: ProjectPaths, args: argparse.Namespace, logger: SetupLogger) -> PrepareResult:
     resolved_model = assets.resolve_main_model(args.model)
     models_root, using_external_models = assets.resolve_models_root(paths.root_dir, args.models_root)
@@ -99,20 +106,13 @@ def _prepare_models(paths: ProjectPaths, args: argparse.Namespace, logger: Setup
     logger.log(f"[INFO] models_root={models_root}")
     logger.log(f"[INFO] encoder_route={encoder_route}")
 
+    allow_download = not using_external_models
     if using_external_models:
-        logger.log(f"[STEP] External models root enabled; trusting assets and skipping downloads: {models_root}")
-        return PrepareResult(
-            resolved_model=resolved_model,
-            models_root=models_root,
-            using_external_models=True,
-            runtime_hints=hints,
-            encoder_route=encoder_route,
-            gguf_model_path=None,
-        )
+        logger.log(f"[STEP] External models root enabled; validating local assets only: {models_root}")
+    else:
+        models_root.mkdir(parents=True, exist_ok=True)
 
-    models_root.mkdir(parents=True, exist_ok=True)
     download_counter = [0]
-    gguf_model_path: str | None = None
     main_asset = assets.AssetSpec(
         label="main model",
         local_dir_name=resolved_model.local_name,
@@ -125,19 +125,24 @@ def _prepare_models(paths: ProjectPaths, args: argparse.Namespace, logger: Setup
         logger,
         paths.recovery_flag_dir,
         download_counter,
+        allow_download=allow_download,
     )
-    if encoder_route == "gguf":
-        assets.ensure_asset_present(assets.GGUF_ASSET, models_root / assets.GGUF_ASSET.local_dir_name, logger, paths.recovery_flag_dir, download_counter)
-        gguf_file = assets.locate_gguf_file(models_root / assets.GGUF_ASSET.local_dir_name)
-        gguf_model_path = str(gguf_file)
-        logger.log(f"[INFO] gguf_file={gguf_file}")
-    elif encoder_route == "full":
-        assets.ensure_asset_present(assets.FULL_BASE_ASSET, models_root / assets.FULL_BASE_ASSET.local_dir_name, logger, paths.recovery_flag_dir, download_counter)
-        assets.ensure_asset_present(assets.FULL_PEFT_ASSET, models_root / assets.FULL_PEFT_ASSET.local_dir_name, logger, paths.recovery_flag_dir, download_counter)
-    else:
-        assets.ensure_asset_present(assets.NF4_ASSET, models_root / assets.NF4_ASSET.local_dir_name, logger, paths.recovery_flag_dir, download_counter)
 
-    if assets.should_inject_once(paths.recovery_flag_dir, "model_missing_after_download", "KIMODO_TEST_INJECT_MODEL_MISSING_AFTER_DOWNLOAD_ONCE"):
+    for encoder_asset in _required_encoder_assets(encoder_route):
+        assets.ensure_asset_present(
+            encoder_asset,
+            models_root / encoder_asset.local_dir_name,
+            logger,
+            paths.recovery_flag_dir,
+            download_counter,
+            allow_download=allow_download,
+        )
+
+    if assets.should_inject_once(
+        paths.recovery_flag_dir,
+        "model_missing_after_download",
+        "KIMODO_TEST_INJECT_MODEL_MISSING_AFTER_DOWNLOAD_ONCE",
+    ):
         main_dir = assets.local_model_dir(models_root, resolved_model)
         logger.log(f"[TEST] Injected model-missing-once by archiving downloaded asset dir: {main_dir}")
         assets.archive_path(main_dir, paths.recycle_dir)
@@ -146,10 +151,9 @@ def _prepare_models(paths: ProjectPaths, args: argparse.Namespace, logger: Setup
     return PrepareResult(
         resolved_model=resolved_model,
         models_root=models_root,
-        using_external_models=False,
+        using_external_models=using_external_models,
         runtime_hints=hints,
         encoder_route=encoder_route,
-        gguf_model_path=gguf_model_path,
     )
 
 
@@ -177,11 +181,10 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, prepared: Prep
         root_dir=paths.root_dir,
         source_root=paths.source_root,
         models_root=prepared.models_root,
+        encoder_route=prepared.encoder_route,
         highvram=bool(args.highvram),
         hints=prepared.runtime_hints,
         cpu_text_encoder=args.cpu_text_encoder,
-        gguf_model_path=prepared.gguf_model_path or os.environ.get("KIMODO_GGUF_MODEL_PATH") or None,
-        gguf_ctx=os.environ.get("KIMODO_GGUF_CTX") or None,
     )
     runtime_env.update(assets.build_offline_cache_env(paths.root_dir))
     runtime_env["KIMODO_IDLE_TIMEOUT_SEC"] = os.environ.get("KIMODO_IDLE_TIMEOUT_SEC", "600")
@@ -218,7 +221,8 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, prepared: Prep
             bridge_pid_file.write_text(f"{launch_proc.pid}\n", encoding="utf-8", newline="\n")
             runtime_env["KIMODO_BRIDGE_PID"] = str(launch_proc.pid)
             logger.log(f"[INFO] Runtime device: {prepared.runtime_hints.normalized_device or '<auto>'}")
-            logger.log(f"[INFO] GGUF model path: {runtime_env['KIMODO_GGUF_MODEL_PATH']}")
+            logger.log(f"[INFO] Text encoder route: {prepared.encoder_route}")
+            logger.log(f"[INFO] Text encoder dir: {runtime_env['KIMODO_LLM2VEC_DIR']}")
             logger.log(f"[INFO] Bridge PID: {launch_proc.pid}")
             watchdog_rc = _run_watchdog(paths, launch_proc.pid, port_file, bridge_log_path, launch_env, args.watchpid)
             launch_proc.poll()
@@ -227,7 +231,8 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, prepared: Prep
         bridge_pid_file.write_text(f"{launch_proc.pid}\n", encoding="utf-8", newline="\n")
         runtime_env["KIMODO_BRIDGE_PID"] = str(launch_proc.pid)
         logger.log(f"[INFO] Runtime device: {prepared.runtime_hints.normalized_device or '<auto>'}")
-        logger.log(f"[INFO] GGUF model path: {runtime_env['KIMODO_GGUF_MODEL_PATH']}")
+        logger.log(f"[INFO] Text encoder route: {prepared.encoder_route}")
+        logger.log(f"[INFO] Text encoder dir: {runtime_env['KIMODO_LLM2VEC_DIR']}")
         logger.log(f"[INFO] Bridge PID: {launch_proc.pid}")
         watchdog_rc = _run_watchdog(paths, launch_proc.pid, port_file, bridge_log_path, launch_env, args.watchpid)
         launch_proc.poll()
@@ -279,14 +284,22 @@ def _run_watchdog(
 
     def _kill_bridge() -> None:
         if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(bridge_pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                ["taskkill", "/PID", str(bridge_pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         else:
             try:
                 os.kill(bridge_pid, signal.SIGTERM)
             except Exception:
                 pass
 
-    _write_watchdog(f"[INFO] Bridge watchdog started. pid={bridge_pid} startup_interval={startup_interval}s startup_max_fails={startup_max_fails} runtime_interval={runtime_interval}s idle_nolog_max={idle_no_log_max}")
+    _write_watchdog(
+        f"[INFO] Bridge watchdog started. pid={bridge_pid} startup_interval={startup_interval}s "
+        f"startup_max_fails={startup_max_fails} runtime_interval={runtime_interval}s idle_nolog_max={idle_no_log_max}"
+    )
 
     while True:
         if not _is_running(bridge_pid):

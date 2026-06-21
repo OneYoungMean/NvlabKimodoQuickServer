@@ -5,6 +5,7 @@
 from .common import resolve_target
 from .kimodo_model import Kimodo
 from .llm2vec import LLM2VecEncoder
+from .llm2vec_int8 import LLM2VecInt8Encoder
 from .load_model import load_model
 from .loading import (
     AVAILABLE_MODELS,
@@ -19,6 +20,7 @@ from .twostage_denoiser import TwostageDenoiser
 __all__ = [
     "Kimodo",
     "LLM2VecEncoder",
+    "LLM2VecInt8Encoder",
     "TMR",
     "TwostageDenoiser",
     "load_model",
