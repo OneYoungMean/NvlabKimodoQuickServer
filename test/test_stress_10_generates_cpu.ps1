@@ -19,6 +19,13 @@ $outputDir = Join-Path $logDir ("stress_outputs_cpu_" + (Get-Date -Format "yyyyM
 if (-not (Test-Path -LiteralPath $runBat)) { throw "Missing run_server.bat: $runBat" }
 if (-not (Test-Path -LiteralPath $ModelsRoot)) { throw "Models root not found: $ModelsRoot" }
 
+if (-not $env:UV_CACHE_DIR) {
+    $env:UV_CACHE_DIR = Join-Path $root ".uv-cache"
+}
+if (-not $env:KIMODO_TEST_VENV_PATH) {
+    $env:KIMODO_TEST_VENV_PATH = Join-Path $root "kimodo\.venv"
+}
+
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 New-Item -ItemType Directory -Path $recycleDir -Force | Out-Null
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -27,7 +34,7 @@ if (Test-Path -LiteralPath $portFile) {
     Move-Item -LiteralPath $portFile -Destination $bak -Force
 }
 
-$env:KIMODO_CPU_TEXT_ENCODER = "gguf"
+$env:KIMODO_CPU_TEXT_ENCODER = "int8"
 $env:KIMODO_TEST_SETUP_DEVICE = "cpu"
 $runCmd = "call `"$runBat`" --model `"$ModelName`" --device cpu --models-root `"$ModelsRoot`" --output file --log `"$runLog`""
 $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/c", $runCmd) -WorkingDirectory $root -WindowStyle Normal -PassThru

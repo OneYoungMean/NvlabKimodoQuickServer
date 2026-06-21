@@ -51,28 +51,31 @@ if errorlevel 1 (
 )
 
 pushd "%SOURCE_DIR%" >nul
+set "COPY_FAIL="
 for /f "usebackq delims=" %%F in (`git ls-files ^| findstr /V /I /R "^program/exe/git/ ^program/exe/uv/ ^program/exe/llama/"`) do (
-  if not "%%F"=="" (
-    set "REL=%%F"
-    set "REL=!REL:/=\!"
-    if exist "!REL!" (
-      for %%P in ("%DEST_DIR%\!REL!") do (
-        if not exist "%%~dpP" mkdir "%%~dpP" >nul 2>nul
-      )
-      copy /Y "!REL!" "%DEST_DIR%\!REL!" >nul
-      if errorlevel 1 (
-        popd >nul
-        echo [ERROR] Failed to copy tracked file: %%F
-        exit /b 1
-      )
-    ) else (
-      echo [WARN] Tracked file missing in working tree, skip: %%F
-    )
+  if not "%%F"=="" if not defined COPY_FAIL (
+    call :copy_relative_file "%%F"
+    if errorlevel 1 set "COPY_FAIL=%%F"
   )
 )
 popd >nul
-if errorlevel 1 (
-  echo [ERROR] tracked file export failed.
+if defined COPY_FAIL (
+  echo [ERROR] Failed to copy tracked file: %COPY_FAIL%
+  exit /b 1
+)
+
+echo [STEP] Copying local test files not yet tracked by git...
+pushd "%SOURCE_DIR%" >nul
+set "COPY_FAIL="
+for /f "usebackq delims=" %%F in (`git ls-files --others --exclude-standard -- test/*.bat test/*.ps1 test/*.md test/cases/*.bat`) do (
+  if not "%%F"=="" if not defined COPY_FAIL (
+    call :copy_relative_file "%%F"
+    if errorlevel 1 set "COPY_FAIL=%%F"
+  )
+)
+popd >nul
+if defined COPY_FAIL (
+  echo [ERROR] Failed to copy local test file: %COPY_FAIL%
   exit /b 1
 )
 
@@ -145,3 +148,14 @@ call "%DEST_TEST_BAT%"
 set "TEST_RC=%ERRORLEVEL%"
 echo [INFO] Test exit code: %TEST_RC%
 exit /b %TEST_RC%
+
+:copy_relative_file
+set "REL=%~1"
+set "REL=%REL:/=\%"
+if not exist "%REL%" exit /b 0
+for %%P in ("%DEST_DIR%\%REL%") do (
+  if not exist "%%~dpP" mkdir "%%~dpP" >nul 2>nul
+)
+copy /Y "%REL%" "%DEST_DIR%\%REL%" >nul
+if errorlevel 1 exit /b 1
+exit /b 0

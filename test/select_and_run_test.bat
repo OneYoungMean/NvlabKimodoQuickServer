@@ -13,9 +13,22 @@ if not exist "%COPY_BAT%" (
 
 set "IDX=0"
 echo.
-echo ===== Select Test =====
-call :add_test_dir "%TEST_DIR%" "test" "copy_to_test_timestamp.bat select_and_run_test.bat"
-call :add_test_dir "%TEST_DIR%\cases" "test\cases" ""
+echo ===== Recommended Tests =====
+call :add_item "test\cases\case_cpu_prepared_models.bat" "CPU prepared models ^(recommended case^)"
+call :add_item "test\cases\case_cpu_from_scratch.bat" "CPU from scratch ^(cold-setup case^)"
+call :add_item "test\test_stress_10_generates_menu.bat" "Stress test menu ^(CPU/CUDA^)"
+call :add_item "test\test_recovery_matrix_serial.bat" "Recovery matrix ^(serial^)"
+
+echo.
+echo ===== Diagnostics =====
+call :add_item "test\test_run_server_multi_start.bat" "Repeated start / idempotency"
+call :add_item "test\test_run_server_watchdog_params.bat" "Watchdog parameter coverage"
+call :add_item "test\test_setup_network_probe.bat" "Setup/download network probe"
+
+echo.
+echo ===== Advanced Cases =====
+call :add_case_dir "%TEST_DIR%\cases" "case_runner.bat case_cpu_prepared_models.bat case_cpu_from_scratch.bat"
+
 if %IDX% LEQ 0 (
   echo [ERROR] No test entries found.
   exit /b 1
@@ -42,21 +55,26 @@ echo [INFO] Selected test: %SELECTED_TEST_REL%
 call "%COPY_BAT%" "%SELECTED_TEST_REL%"
 exit /b %ERRORLEVEL%
 
-:add_test_dir
+:add_item
+set "ITEM_REL=%~1"
+set "ITEM_LABEL=%~2"
+for %%I in ("%TEST_DIR%\..\%ITEM_REL%") do set "ITEM_PATH=%%~fI"
+if not exist "%ITEM_PATH%" exit /b 0
+set /a IDX+=1
+set "ITEM_REL[%IDX%]=%ITEM_REL%"
+echo   [%IDX%] %ITEM_LABEL%
+exit /b 0
+
+:add_case_dir
 set "LIST_DIR=%~1"
-set "DISPLAY_PREFIX=%~2"
-set "SKIP_LIST=%~3"
+set "SKIP_LIST=%~2"
 if not exist "%LIST_DIR%" exit /b 0
 for /f "delims=" %%F in ('dir /b /a-d "%LIST_DIR%\*.bat" 2^>nul') do (
   call :should_skip "%%~nxF" "%SKIP_LIST%"
   if errorlevel 1 (
     set /a IDX+=1
-    if /I "%DISPLAY_PREFIX%"=="test" (
-      set "ITEM_REL[!IDX!]=test\%%F"
-    ) else (
-      set "ITEM_REL[!IDX!]=test\cases\%%F"
-    )
-    echo   [!IDX!] %DISPLAY_PREFIX%\%%F
+    set "ITEM_REL[!IDX!]=test\cases\%%F"
+    echo   [!IDX!] case: %%F
   )
 )
 exit /b 0
