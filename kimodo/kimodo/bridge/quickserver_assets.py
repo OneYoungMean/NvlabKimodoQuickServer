@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+import threading
 import time
 from typing import Protocol
 
@@ -266,6 +268,146 @@ def should_inject_once(recovery_flag_dir: Path, key: str, env_var: str) -> bool:
     return True
 
 
+def _format_bytes(value: int) -> str:
+    size = float(max(0, int(value)))
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    for unit in units:
+        if size < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{int(value)} B"
+
+
+@contextmanager
+def _suppress_modelscope_tqdm():
+    try:
+        import modelscope.hub.file_download as file_download
+        import modelscope.hub.snapshot_download as snapshot_download_mod
+    except Exception:
+        yield
+        return
+
+    original_file_tqdm = getattr(file_download, "tqdm", None)
+    original_snapshot_tqdm = getattr(snapshot_download_mod, "tqdm", None)
+    original_tqdm_callback = getattr(file_download, "TqdmCallback", None)
+
+    class _NoopTqdm:
+        def __init__(self, *args, **kwargs):
+            self.total = kwargs.get("total", 0)
+
+        def update(self, *args, **kwargs):
+            return None
+
+        def refresh(self):
+            return None
+
+        def close(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.close()
+            return False
+
+        def set_description(self, *args, **kwargs):
+            return None
+
+        def set_postfix(self, *args, **kwargs):
+            return None
+
+    class _NoopProgressCallback:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def update(self, *args, **kwargs):
+            return None
+
+        def end(self):
+            return None
+
+    if original_file_tqdm is not None:
+        file_download.tqdm = _NoopTqdm
+    if original_snapshot_tqdm is not None:
+        snapshot_download_mod.tqdm = _NoopTqdm
+    if original_tqdm_callback is not None:
+        file_download.TqdmCallback = _NoopProgressCallback
+
+    try:
+        yield
+    finally:
+        if original_file_tqdm is not None:
+            file_download.tqdm = original_file_tqdm
+        if original_snapshot_tqdm is not None:
+            snapshot_download_mod.tqdm = original_snapshot_tqdm
+        if original_tqdm_callback is not None:
+            file_download.TqdmCallback = original_tqdm_callback
+
+
+def _make_logged_progress_callback(logger: LoggerLike, label: str):
+    log_lock = threading.Lock()
+
+    class _LoggedProgressCallback:
+        def __init__(self, filename: str, file_size: int):
+            self.filename = str(filename)
+            self.file_size = max(0, int(file_size or 0))
+            self.downloaded = 0
+            self._last_logged_at = 0.0
+            self._started_at = time.monotonic()
+            self._finished = False
+            self._log(
+                f"[DOWNLOAD] {label}: {self.filename} started "
+                f"({self._size_text(self.file_size)})"
+            )
+
+        def _log(self, message: str) -> None:
+            with log_lock:
+                logger.log(message)
+
+        def _size_text(self, value: int) -> str:
+            return _format_bytes(value)
+
+        def _status_text(self) -> str:
+            if self.file_size > 0:
+                downloaded = min(self.downloaded, self.file_size)
+                percent = min(100, int(downloaded * 100 / self.file_size))
+                return (
+                    f"{self._size_text(downloaded)}/{self._size_text(self.file_size)} "
+                    f"({percent}%)"
+                )
+            return f"{self._size_text(self.downloaded)} downloaded"
+
+        def _maybe_log(self, final: bool = False) -> None:
+            if self._finished and not final:
+                return
+            now = time.monotonic()
+            if not final and now - self._last_logged_at < 5.0:
+                return
+            self._last_logged_at = now
+            self._log(f"[DOWNLOAD] {label}: {self.filename} {self._status_text()}")
+
+        def update(self, size: int):
+            self.downloaded += int(size)
+            self._maybe_log(final=False)
+
+        def end(self):
+            if self._finished:
+                return
+            self._finished = True
+            if self.file_size > 0:
+                self.downloaded = max(self.downloaded, self.file_size)
+            elapsed = time.monotonic() - self._started_at
+            self._log(
+                f"[DOWNLOAD] {label}: {self.filename} complete "
+                f"({self._status_text()}, {elapsed:.1f}s)"
+            )
+
+    return _LoggedProgressCallback
+
+
 def ensure_asset_present(
     asset: AssetSpec,
     target_dir: Path,
@@ -283,7 +425,13 @@ def ensure_asset_present(
     from modelscope import snapshot_download as ms_snapshot_download
 
     try:
-        ms_snapshot_download(model_id=asset.modelscope_repo, local_dir=str(target_dir))
+        progress_callbacks = [_make_logged_progress_callback(logger, asset.label)]
+        with _suppress_modelscope_tqdm():
+            ms_snapshot_download(
+                model_id=asset.modelscope_repo,
+                local_dir=str(target_dir),
+                progress_callbacks=progress_callbacks,
+            )
     except Exception as exc:
         raise RuntimeError(f"Failed to download {asset.label} via ModelScope: {exc}") from exc
 
@@ -309,6 +457,8 @@ def build_runtime_env(
         "PYTHONPATH": str(Path(source_root).resolve()),
         "KIMODO_ROOT_PATH": str(root),
         "CHECKPOINT_DIR": str(models_path),
+        "KIMODO_MODELS_ROOT": str(models_path),
+        "KIMODO_HIGHVRAM": "1" if highvram else "0",
         "LOCAL_CACHE": "true",
         "TEXT_ENCODER": "llm2vec",
         "KIMODO_CPU_TEXT_ENCODER": str(cpu_text_encoder or "gguf"),
