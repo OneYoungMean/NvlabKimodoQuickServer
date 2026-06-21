@@ -29,13 +29,25 @@ cd /d C:\nvlab\NvlabKimodoQuickServer1
 program\exe\uv\uv.exe run --python 3.12 --no-project python tools\build_llm2vec_int8.py --verify
 ```
 
+Linux:
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer1
+./run_server.sh setup --output console
+```
+
 ## Example
 ```bat
 cd /d C:\nvlab\NvlabKimodoQuickServer1
 run_server.bat --model Kimodo-SOMA-RP-v1 --models-root C:\nvlab\models~ --output console
 ```
 
-Low-VRAM runs now use the local Torch CPU INT8 text encoder asset under `models\KIMODO-Meta3_llm2vec_INT8` by default.
+Linux:
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer1
+./run_server.sh --model Kimodo-SOMA-RP-v1 --models-root /mnt/c/nvlab/models~ --output console
+```
+
+Low-VRAM runs now default to the local Torch CPU INT8 text encoder asset under `models\KIMODO-Meta3_llm2vec_INT8`.
 
 TCP smoke test:
 ```bat

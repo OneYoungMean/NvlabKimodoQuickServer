@@ -11,6 +11,7 @@ Persistent process for Unity Editor:
 import argparse
 import json
 import os
+from pathlib import Path
 import socket
 import sys
 import threading
@@ -20,6 +21,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+
+from kimodo.bridge import quickserver_assets as assets
 
 
 def _default_bridge_log_path(root: str) -> str:
@@ -100,6 +103,191 @@ def _log(msg: str):
             f.write(line + "\n")
     except Exception:
         pass
+
+
+class _BridgeAssetLogger:
+    def log(self, message: str) -> None:
+        _log(message)
+
+
+@dataclass(frozen=True)
+class _BridgeProvisionPlan:
+    resolved_model: assets.ResolvedModel
+    models_root: Path
+    using_external_models: bool
+    highvram: bool
+    encoder_route: str
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw not in ("0", "false", "no", "off")
+
+
+def _ensure_asset_ready(
+    asset: assets.AssetSpec,
+    target_dir: Path,
+    logger: _BridgeAssetLogger,
+    recovery_flag_dir: Path,
+    download_counter: list[int],
+    *,
+    allow_download: bool,
+) -> None:
+    if assets.asset_is_ready(asset, target_dir):
+        logger.log(f"[SKIP] {asset.label} ready: {target_dir}")
+        return
+    if target_dir.exists():
+        logger.log(f"[INFO] {asset.label} exists but looks incomplete, refreshing: {target_dir}")
+    assets.ensure_asset_present(
+        asset,
+        target_dir,
+        logger,
+        recovery_flag_dir,
+        download_counter,
+        allow_download=allow_download,
+    )
+
+
+def _build_bridge_provision_plan(
+    kimodo_root: str,
+    requested_model: str,
+    *,
+    run_device: str | None,
+    total_vram_gb: float,
+) -> _BridgeProvisionPlan:
+    root_path = Path(kimodo_root).resolve()
+    resolved_model = assets.resolve_main_model(requested_model)
+    models_root, using_external_models = assets.resolve_models_root(
+        root_path,
+        os.environ.get("KIMODO_MODELS_ROOT"),
+    )
+    highvram = _env_flag("KIMODO_HIGHVRAM", False)
+    hints = assets.normalize_runtime_hints(
+        run_device,
+        os.environ.get("KIMODO_CPU_TEXT_ENCODER", "int8"),
+    )
+    encoder_route = assets.choose_prepare_encoder_route(
+        highvram,
+        hints,
+        total_vram_gb=total_vram_gb,
+    )
+    return _BridgeProvisionPlan(
+        resolved_model=resolved_model,
+        models_root=models_root,
+        using_external_models=using_external_models,
+        highvram=highvram,
+        encoder_route=encoder_route,
+    )
+
+
+def _apply_bridge_runtime_env(kimodo_root: str, plan: _BridgeProvisionPlan) -> None:
+    root_path = Path(kimodo_root).resolve()
+    models_root = plan.models_root
+    os.environ["PYTHONPATH"] = str(root_path / "kimodo")
+    os.environ["KIMODO_ROOT_PATH"] = str(root_path)
+    os.environ["CHECKPOINT_DIR"] = str(models_root)
+    os.environ["KIMODO_MODELS_ROOT"] = str(models_root)
+    os.environ["KIMODO_HIGHVRAM"] = "1" if plan.highvram else "0"
+    os.environ["LOCAL_CACHE"] = "true"
+
+    if plan.encoder_route == "int8":
+        os.environ["TEXT_ENCODER"] = "llm2vec_int8"
+        os.environ["KIMODO_CPU_TEXT_ENCODER"] = "int8"
+        os.environ["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = "cpu"
+        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / assets.INT8_LOCAL_DIR)
+        os.environ["TEXT_ENCODERS_DIR"] = ""
+        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = ""
+    elif plan.encoder_route == "full":
+        os.environ["TEXT_ENCODER"] = "llm2vec"
+        os.environ["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = "auto"
+        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / assets.FULL_BASE_LOCAL_DIR)
+        os.environ["TEXT_ENCODERS_DIR"] = str(models_root)
+        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = str(models_root / assets.FULL_PEFT_LOCAL_DIR)
+    else:
+        os.environ["TEXT_ENCODER"] = "llm2vec"
+        os.environ["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = "auto"
+        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / assets.NF4_LOCAL_DIR)
+        os.environ["TEXT_ENCODERS_DIR"] = ""
+        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = ""
+
+
+def _provision_bridge_assets(
+    kimodo_root: str,
+    requested_model: str,
+    *,
+    run_device: str | None,
+    total_vram_gb: float,
+) -> _BridgeProvisionPlan:
+    plan = _build_bridge_provision_plan(
+        kimodo_root,
+        requested_model,
+        run_device=run_device,
+        total_vram_gb=total_vram_gb,
+    )
+    logger = _BridgeAssetLogger()
+    recovery_flag_dir = Path(kimodo_root).resolve() / "archive" / "recovery_flags"
+    recycle_dir = Path(kimodo_root).resolve() / "archive" / "recycle"
+    allow_download = not plan.using_external_models
+    download_counter = [0]
+
+    _apply_bridge_runtime_env(kimodo_root, plan)
+    if allow_download:
+        plan.models_root.mkdir(parents=True, exist_ok=True)
+
+    logger.log(
+        f"[bridge] asset plan: model={plan.resolved_model.local_name} "
+        f"models_root={plan.models_root} encoder_route={plan.encoder_route} "
+        f"external_models_root={plan.using_external_models}"
+    )
+
+    main_asset = assets.AssetSpec(
+        label="main model",
+        local_dir_name=plan.resolved_model.local_name,
+        modelscope_repo=plan.resolved_model.modelscope_repo,
+        huggingface_repo=plan.resolved_model.huggingface_repo,
+    )
+    main_dir = assets.local_model_dir(plan.models_root, plan.resolved_model)
+    _ensure_asset_ready(
+        main_asset,
+        main_dir,
+        logger,
+        recovery_flag_dir,
+        download_counter,
+        allow_download=allow_download,
+    )
+
+    if plan.encoder_route == "int8":
+        encoder_assets = [assets.INT8_ASSET]
+    elif plan.encoder_route == "full":
+        encoder_assets = [assets.FULL_BASE_ASSET, assets.FULL_PEFT_ASSET]
+    else:
+        encoder_assets = [assets.NF4_ASSET]
+
+    for encoder_asset in encoder_assets:
+        _ensure_asset_ready(
+            encoder_asset,
+            plan.models_root / encoder_asset.local_dir_name,
+            logger,
+            recovery_flag_dir,
+            download_counter,
+            allow_download=allow_download,
+        )
+
+    if assets.should_inject_once(
+        recovery_flag_dir,
+        "model_missing_after_download",
+        "KIMODO_TEST_INJECT_MODEL_MISSING_AFTER_DOWNLOAD_ONCE",
+    ):
+        logger.log(f"[TEST] Injected model-missing-once by archiving downloaded asset dir: {main_dir}")
+        assets.archive_path(main_dir, recycle_dir)
+
+    logger.log(
+        f"[bridge] asset plan complete: model={plan.resolved_model.local_name} "
+        f"encoder_route={plan.encoder_route} downloads={download_counter[0]}"
+    )
+    return plan
 
 
 def _rotation_mats_to_quat_wxyz(rot_mats: np.ndarray) -> np.ndarray:
@@ -428,9 +616,24 @@ def main():
             else:
                 device = "cuda:0"
 
-        use_int8_encoder = str(device).lower() == "cpu" or total_vram_gb < 6.0
+        _set_loading_message("Checking local models...")
+        _out({"status": "loading", "message": "Checking local models..."})
+        try:
+            provision_plan = _provision_bridge_assets(
+                kimodo_root,
+                args.model,
+                run_device=device,
+                total_vram_gb=total_vram_gb,
+            )
+        except Exception as exc:
+            with state_lock:
+                state["error"] = f"Model prepare failed: {exc}\n{traceback.format_exc()}"
+                state["loading"] = False
+            _log(f"[bridge] model prepare error {exc}")
+            return
 
-        _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} use_int8_encoder={use_int8_encoder}")
+        use_int8_encoder = provision_plan.encoder_route == "int8"
+        _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} encoder_route={provision_plan.encoder_route}")
 
         if use_int8_encoder:
             os.environ["TEXT_ENCODER"] = "llm2vec_int8"
@@ -439,16 +642,17 @@ def main():
             os.environ["TEXT_ENCODER_DEVICE"] = "cpu"
             _log("[bridge] local INT8 text encoder selected (tier: vram<6G).")
         else:
-            # >=6G tier: use local LLM2Vec directly.
             os.environ["TEXT_ENCODER"] = "llm2vec"
             os.environ["TEXT_ENCODER_MODE"] = "local"
             os.environ["TEXT_ENCODER_DEVICE"] = "auto"
             _log("[bridge] local LLM2Vec text encoder selected (tier: vram>=6G).")
-        _set_loading_message(f"Loading {args.model} on {device}...")
-        _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
-        _log(f"[bridge] load stage: load_model start model={args.model} device={device}")
+
+        resolved_model_name = provision_plan.resolved_model.local_name
+        _set_loading_message(f"Loading {resolved_model_name} on {device}...")
+        _out({"status": "loading", "message": f"Loading {resolved_model_name} on {device}..."})
+        _log(f"[bridge] load stage: load_model start model={resolved_model_name} device={device}")
         try:
-            model = load_model(args.model, device=device)
+            model = load_model(resolved_model_name, device=device)
         except Exception as exc:
             with state_lock:
                 state["error"] = f"Model load failed: {exc}\n{traceback.format_exc()}"
@@ -464,10 +668,10 @@ def main():
             state["loading"] = False
             state["error"] = ""
 
-        _log(f"[bridge] ready host={host} port={port} model={args.model} device={device}")
+        _log(f"[bridge] ready host={host} port={port} model={resolved_model_name} device={device}")
         _out({
             "status": "ready",
-            "model": args.model,
+            "model": resolved_model_name,
             "device": device,
             "fps": int(model.fps),
             "host": host,

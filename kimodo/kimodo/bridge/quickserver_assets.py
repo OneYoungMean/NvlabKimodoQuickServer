@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+import threading
 import time
 from typing import Protocol
 
@@ -282,13 +284,27 @@ def _has_any_file(model_dir: Path, filenames: tuple[str, ...]) -> bool:
     return any((model_dir / filename).is_file() for filename in filenames)
 
 
+def _has_any_path(target_dir: Path, names: tuple[str, ...] = (), patterns: tuple[str, ...] = ()) -> bool:
+    for name in names:
+        if (target_dir / name).exists():
+            return True
+    for pattern in patterns:
+        if any(target_dir.glob(pattern)):
+            return True
+    return False
+
+
 def _has_weight_file(model_dir: Path) -> bool:
     patterns = ("*.safetensors", "*.bin")
     return any(any(model_dir.glob(pattern)) for pattern in patterns)
 
 
 def _main_model_ready(model_dir: Path) -> bool:
-    return (model_dir / "config.yaml").is_file()
+    return (model_dir / "config.yaml").is_file() and _has_any_path(
+        model_dir,
+        names=("model.safetensors", "pytorch_model.bin", "model.ckpt"),
+        patterns=("*.pt", "*.safetensors"),
+    )
 
 
 def _llm2vec_ready(model_dir: Path) -> bool:
@@ -332,6 +348,140 @@ def asset_is_ready(asset: AssetSpec, target_dir: Path) -> bool:
     return target_dir.exists()
 
 
+def _format_bytes(value: int) -> str:
+    size = float(max(0, int(value)))
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    for unit in units:
+        if size < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{int(value)} B"
+
+
+@contextmanager
+def _suppress_modelscope_tqdm():
+    try:
+        import modelscope.hub.file_download as file_download
+        import modelscope.hub.snapshot_download as snapshot_download_mod
+    except Exception:
+        yield
+        return
+
+    original_file_tqdm = getattr(file_download, "tqdm", None)
+    original_snapshot_tqdm = getattr(snapshot_download_mod, "tqdm", None)
+    original_tqdm_callback = getattr(file_download, "TqdmCallback", None)
+
+    class _NoopTqdm:
+        def __init__(self, *args, **kwargs):
+            self.total = kwargs.get("total", 0)
+
+        def update(self, *args, **kwargs):
+            return None
+
+        def refresh(self):
+            return None
+
+        def close(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.close()
+            return False
+
+        def set_description(self, *args, **kwargs):
+            return None
+
+        def set_postfix(self, *args, **kwargs):
+            return None
+
+    class _NoopProgressCallback:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def update(self, *args, **kwargs):
+            return None
+
+        def end(self):
+            return None
+
+    if original_file_tqdm is not None:
+        file_download.tqdm = _NoopTqdm
+    if original_snapshot_tqdm is not None:
+        snapshot_download_mod.tqdm = _NoopTqdm
+    if original_tqdm_callback is not None:
+        file_download.TqdmCallback = _NoopProgressCallback
+
+    try:
+        yield
+    finally:
+        if original_file_tqdm is not None:
+            file_download.tqdm = original_file_tqdm
+        if original_snapshot_tqdm is not None:
+            snapshot_download_mod.tqdm = original_snapshot_tqdm
+        if original_tqdm_callback is not None:
+            file_download.TqdmCallback = original_tqdm_callback
+
+
+def _make_logged_progress_callback(logger: LoggerLike, label: str):
+    log_lock = threading.Lock()
+
+    class _LoggedProgressCallback:
+        def __init__(self, filename: str, file_size: int):
+            self.filename = str(filename)
+            self.file_size = max(0, int(file_size or 0))
+            self.downloaded = 0
+            self._last_logged_at = 0.0
+            self._started_at = time.monotonic()
+            self._finished = False
+            self._log(
+                f"[DOWNLOAD] {label}: {self.filename} started "
+                f"({_format_bytes(self.file_size)})"
+            )
+
+        def _log(self, message: str) -> None:
+            with log_lock:
+                logger.log(message)
+
+        def _status_text(self) -> str:
+            if self.file_size > 0:
+                downloaded = min(self.downloaded, self.file_size)
+                percent = min(100, int(downloaded * 100 / self.file_size))
+                return f"{_format_bytes(downloaded)}/{_format_bytes(self.file_size)} ({percent}%)"
+            return f"{_format_bytes(self.downloaded)} downloaded"
+
+        def _maybe_log(self, final: bool = False) -> None:
+            if self._finished and not final:
+                return
+            now = time.monotonic()
+            if not final and now - self._last_logged_at < 5.0:
+                return
+            self._last_logged_at = now
+            self._log(f"[DOWNLOAD] {label}: {self.filename} {self._status_text()}")
+
+        def update(self, size: int):
+            self.downloaded += int(size)
+            self._maybe_log(final=False)
+
+        def end(self):
+            if self._finished:
+                return
+            self._finished = True
+            if self.file_size > 0:
+                self.downloaded = max(self.downloaded, self.file_size)
+            elapsed = time.monotonic() - self._started_at
+            self._log(
+                f"[DOWNLOAD] {label}: {self.filename} complete "
+                f"({self._status_text()}, {elapsed:.1f}s)"
+            )
+
+    return _LoggedProgressCallback
+
+
 def ensure_asset_present(
     asset: AssetSpec,
     target_dir: Path,
@@ -359,7 +509,13 @@ def ensure_asset_present(
     from modelscope import snapshot_download as ms_snapshot_download
 
     try:
-        ms_snapshot_download(model_id=asset.modelscope_repo, local_dir=str(target_dir))
+        progress_callbacks = [_make_logged_progress_callback(logger, asset.label)]
+        with _suppress_modelscope_tqdm():
+            ms_snapshot_download(
+                model_id=asset.modelscope_repo,
+                local_dir=str(target_dir),
+                progress_callbacks=progress_callbacks,
+            )
     except Exception as exc:
         raise RuntimeError(f"Failed to download {asset.label} via ModelScope: {exc}") from exc
 
@@ -376,31 +532,36 @@ def build_runtime_env(
     root_dir: str | os.PathLike[str],
     source_root: str | os.PathLike[str],
     models_root: str | os.PathLike[str],
-    encoder_route: str,
     highvram: bool,
     hints: RuntimeHints,
     cpu_text_encoder: str,
+    encoder_route: str | None = None,
+    gguf_model_path: str | None = None,
+    gguf_ctx: str | None = None,
 ) -> dict[str, str]:
     root = Path(root_dir).resolve()
     models_path = Path(models_root).resolve()
     normalized_cpu_encoder = validate_cpu_text_encoder(cpu_text_encoder)
+    selected_encoder_route = encoder_route or choose_prepare_encoder_route(highvram, hints)
 
     env: dict[str, str] = {
         "PYTHONPATH": str(Path(source_root).resolve()),
         "KIMODO_ROOT_PATH": str(root),
         "CHECKPOINT_DIR": str(models_path),
+        "KIMODO_MODELS_ROOT": str(models_path),
+        "KIMODO_HIGHVRAM": "1" if highvram else "0",
         "LOCAL_CACHE": "true",
-        "TEXT_ENCODER": "llm2vec_int8" if encoder_route == "int8" else "llm2vec",
+        "TEXT_ENCODER": "llm2vec_int8" if selected_encoder_route == "int8" else "llm2vec",
         "KIMODO_CPU_TEXT_ENCODER": normalized_cpu_encoder,
     }
     if hints.text_encoder_device_hint:
         env["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = hints.text_encoder_device_hint
 
-    if encoder_route == "full" and highvram:
+    if selected_encoder_route == "full" and highvram:
         env["KIMODO_LLM2VEC_DIR"] = str(models_path / FULL_BASE_LOCAL_DIR)
         env["TEXT_ENCODERS_DIR"] = str(models_path)
         env["KIMODO_LLM2VEC_PEFT_DIR"] = str(models_path / FULL_PEFT_LOCAL_DIR)
-    elif encoder_route == "nf4":
+    elif selected_encoder_route == "nf4":
         env["KIMODO_LLM2VEC_DIR"] = str(models_path / NF4_LOCAL_DIR)
         env["TEXT_ENCODERS_DIR"] = ""
         env["KIMODO_LLM2VEC_PEFT_DIR"] = ""

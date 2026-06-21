@@ -29,10 +29,22 @@ cd /d C:\nvlab\NvlabKimodoQuickServer1
 program\exe\uv\uv.exe run --python 3.12 --no-project python tools\build_llm2vec_int8.py --verify
 ```
 
+Linux：
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer1
+./run_server.sh setup --output console
+```
+
 ## Example
 ```bat
 cd /d C:\nvlab\NvlabKimodoQuickServer1
 run_server.bat --model Kimodo-SOMA-RP-v1 --models-root C:\nvlab\models~ --output console
+```
+
+Linux：
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer1
+./run_server.sh --model Kimodo-SOMA-RP-v1 --models-root /mnt/c/nvlab/models~ --output console
 ```
 
 低显存运行现在默认使用 `models\KIMODO-Meta3_llm2vec_INT8` 这份本地 Torch CPU INT8 文本编码器资产。
