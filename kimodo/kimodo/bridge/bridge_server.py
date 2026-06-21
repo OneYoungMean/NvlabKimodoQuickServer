@@ -13,6 +13,7 @@ from collections import deque
 import json
 import os
 import platform
+from pathlib import Path
 import shutil
 import socket
 import subprocess
@@ -29,6 +30,7 @@ from typing import Any
 
 import numpy as np
 
+from kimodo.bridge import quickserver_assets as assets
 from kimodo.bridge.quickserver_assets import (
     FULL_BASE_LOCAL_DIR,
     FULL_PEFT_LOCAL_DIR,
@@ -48,6 +50,73 @@ def _default_gguf_model_path(root: str) -> str:
     if not root:
         return ""
     return default_gguf_model_path(os.path.join(root, "models"))
+
+
+def _format_bytes(value: int) -> str:
+    size = float(max(0, int(value)))
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    for unit in units:
+        if size < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{int(value)} B"
+
+
+def _download_file_with_progress(url: str, destination: str, label: str, timeout_sec: int = 120) -> None:
+    chunk_size = 8 * 1024 * 1024
+    downloaded = 0
+    total = None
+    last_log_at = 0.0
+    temp_path = f"{destination}.downloading.{os.getpid()}"
+    completed = False
+
+    def _emit_progress(final: bool = False) -> None:
+        nonlocal last_log_at
+        now = time.monotonic()
+        if not final and now - last_log_at < 5.0:
+            return
+        last_log_at = now
+        if total and total > 0:
+            percent = min(100, int(downloaded * 100 / total))
+            _log(f"[{label}] {_format_bytes(downloaded)}/{_format_bytes(total)} ({percent}%)")
+        else:
+            _log(f"[{label}] {_format_bytes(downloaded)} downloaded")
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_sec) as resp, open(temp_path, "wb") as out:
+            try:
+                content_length = resp.headers.get("Content-Length")
+                if content_length is not None:
+                    total = int(content_length)
+            except Exception:
+                total = None
+
+            _log(f"[{label}] starting download: {url}")
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                out.write(chunk)
+                downloaded += len(chunk)
+                _emit_progress(final=False)
+
+        os.replace(temp_path, destination)
+        completed = True
+        _emit_progress(final=True)
+    except Exception:
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+        raise
+    finally:
+        if not completed:
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 
 def _detect_total_vram_gb() -> float:
@@ -221,10 +290,8 @@ class LlamaServiceManager:
         )
         os.makedirs(llama_dir, exist_ok=True)
         archive_path = os.path.join(llama_dir, asset)
-        _log(f"[llama] downloading {url}")
         try:
-            with urllib.request.urlopen(url, timeout=120) as resp, open(archive_path, "wb") as out:
-                shutil.copyfileobj(resp, out)
+            _download_file_with_progress(url, archive_path, "llama", timeout_sec=120)
         except urllib.error.URLError as exc:
             raise RuntimeError(
                 f"Failed to download llama.cpp asset {asset} from {url}: {exc}"
@@ -464,6 +531,222 @@ class LlamaServiceManager:
             _log(f"[llama] stopped rc={proc.returncode}")
         except Exception as exc:
             _log(f"[llama] stop error: {exc}")
+
+
+class _BridgeAssetLogger:
+    def log(self, message: str) -> None:
+        _log(message)
+
+
+@dataclass(frozen=True)
+class _BridgeProvisionPlan:
+    resolved_model: assets.ResolvedModel
+    models_root: Path
+    using_external_models: bool
+    highvram: bool
+    encoder_route: str
+    requested_gguf_path: Path
+    managed_gguf_path: Path
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw not in ("0", "false", "no", "off")
+
+
+def _has_any_path(target_dir: Path, names: tuple[str, ...] = (), patterns: tuple[str, ...] = ()) -> bool:
+    for name in names:
+        if (target_dir / name).exists():
+            return True
+    for pattern in patterns:
+        if any(target_dir.glob(pattern)):
+            return True
+    return False
+
+
+def _is_asset_ready(asset: assets.AssetSpec, target_dir: Path) -> bool:
+    if not target_dir.exists():
+        return False
+
+    if asset.local_dir_name == GGUF_LOCAL_DIR:
+        return assets.locate_gguf_file(target_dir).is_file()
+
+    if asset.local_dir_name == FULL_BASE_LOCAL_DIR:
+        return (target_dir / "config.json").is_file() and _has_any_path(
+            target_dir,
+            names=("model.safetensors", "model.safetensors.index.json", "pytorch_model.bin"),
+            patterns=("model-*.safetensors",),
+        )
+
+    if asset.local_dir_name == FULL_PEFT_LOCAL_DIR:
+        return (target_dir / "adapter_config.json").is_file() and _has_any_path(
+            target_dir,
+            names=("adapter_model.safetensors", "model.safetensors", "pytorch_model.bin"),
+            patterns=("adapter_model-*.safetensors",),
+        )
+
+    if asset.local_dir_name == NF4_LOCAL_DIR:
+        return (target_dir / "config.json").is_file() and _has_any_path(
+            target_dir,
+            names=("model.safetensors", "model.safetensors.index.json", "pytorch_model.bin"),
+            patterns=("*.safetensors",),
+        )
+
+    return (target_dir / "config.yaml").is_file() and _has_any_path(
+        target_dir,
+        names=("model.safetensors", "pytorch_model.bin", "model.ckpt"),
+        patterns=("*.pt", "*.safetensors"),
+    )
+
+
+def _ensure_asset_ready(
+    asset: assets.AssetSpec,
+    target_dir: Path,
+    logger: _BridgeAssetLogger,
+    recovery_flag_dir: Path,
+    download_counter: list[int],
+) -> None:
+    if _is_asset_ready(asset, target_dir):
+        logger.log(f"[SKIP] {asset.label} ready: {target_dir}")
+        return
+    if target_dir.exists():
+        logger.log(f"[INFO] {asset.label} exists but looks incomplete, refreshing: {target_dir}")
+    assets.ensure_asset_present(asset, target_dir, logger, recovery_flag_dir, download_counter)
+
+
+def _build_bridge_provision_plan(
+    kimodo_root: str,
+    requested_model: str,
+    *,
+    use_gguf_encoder: bool,
+) -> _BridgeProvisionPlan:
+    root_path = Path(kimodo_root).resolve()
+    resolved_model = assets.resolve_main_model(requested_model)
+    models_root, using_external_models = assets.resolve_models_root(
+        root_path,
+        os.environ.get("KIMODO_MODELS_ROOT"),
+    )
+    highvram = _env_flag("KIMODO_HIGHVRAM", False)
+
+    raw_gguf_path = os.environ.get("KIMODO_GGUF_MODEL_PATH", "").strip()
+    if raw_gguf_path:
+        requested_gguf_path = Path(raw_gguf_path).expanduser()
+        if not requested_gguf_path.is_absolute():
+            requested_gguf_path = (root_path / requested_gguf_path).resolve()
+        else:
+            requested_gguf_path = requested_gguf_path.resolve()
+    else:
+        requested_gguf_path = Path(assets.default_gguf_model_path(models_root)).resolve()
+
+    managed_gguf_path = Path(assets.default_gguf_model_path(models_root)).resolve()
+    encoder_route = "gguf" if use_gguf_encoder else ("full" if highvram else "nf4")
+
+    return _BridgeProvisionPlan(
+        resolved_model=resolved_model,
+        models_root=models_root,
+        using_external_models=using_external_models,
+        highvram=highvram,
+        encoder_route=encoder_route,
+        requested_gguf_path=requested_gguf_path,
+        managed_gguf_path=managed_gguf_path,
+    )
+
+
+def _apply_bridge_runtime_env(kimodo_root: str, plan: _BridgeProvisionPlan) -> None:
+    models_root = plan.models_root
+    os.environ["KIMODO_ROOT_PATH"] = str(Path(kimodo_root).resolve())
+    os.environ["CHECKPOINT_DIR"] = str(models_root)
+    os.environ["KIMODO_MODELS_ROOT"] = str(models_root)
+    os.environ["LOCAL_CACHE"] = "true"
+    os.environ["TEXT_ENCODER"] = "llm2vec"
+    os.environ["KIMODO_GGUF_MODEL_PATH"] = str(plan.requested_gguf_path)
+
+    if plan.highvram:
+        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / FULL_BASE_LOCAL_DIR)
+        os.environ["TEXT_ENCODERS_DIR"] = str(models_root)
+        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = str(models_root / FULL_PEFT_LOCAL_DIR)
+    else:
+        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / NF4_LOCAL_DIR)
+        os.environ["TEXT_ENCODERS_DIR"] = ""
+        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = ""
+
+
+def _provision_bridge_assets(kimodo_root: str, requested_model: str, *, use_gguf_encoder: bool) -> _BridgeProvisionPlan:
+    plan = _build_bridge_provision_plan(kimodo_root, requested_model, use_gguf_encoder=use_gguf_encoder)
+    logger = _BridgeAssetLogger()
+    recovery_flag_dir = Path(kimodo_root).resolve() / "archive" / "recovery_flags"
+    recycle_dir = Path(kimodo_root).resolve() / "archive" / "recycle"
+    download_counter = [0]
+
+    _apply_bridge_runtime_env(kimodo_root, plan)
+    plan.models_root.mkdir(parents=True, exist_ok=True)
+
+    logger.log(
+        f"[bridge] asset plan: model={plan.resolved_model.local_name} "
+        f"models_root={plan.models_root} encoder_route={plan.encoder_route} "
+        f"external_models_root={plan.using_external_models}"
+    )
+
+    main_asset = assets.AssetSpec(
+        label="main model",
+        local_dir_name=plan.resolved_model.local_name,
+        modelscope_repo=plan.resolved_model.modelscope_repo,
+        huggingface_repo=plan.resolved_model.huggingface_repo,
+    )
+    main_dir = assets.local_model_dir(plan.models_root, plan.resolved_model)
+    _ensure_asset_ready(main_asset, main_dir, logger, recovery_flag_dir, download_counter)
+
+    if plan.encoder_route == "gguf":
+        if plan.requested_gguf_path.is_file():
+            logger.log(f"[SKIP] GGUF text encoder ready: {plan.requested_gguf_path}")
+        else:
+            if plan.requested_gguf_path != plan.managed_gguf_path:
+                logger.log(
+                    f"[WARN] Explicit GGUF path missing, provisioning managed GGUF asset instead: "
+                    f"{plan.requested_gguf_path}"
+                )
+            gguf_dir = plan.models_root / assets.GGUF_ASSET.local_dir_name
+            _ensure_asset_ready(assets.GGUF_ASSET, gguf_dir, logger, recovery_flag_dir, download_counter)
+            os.environ["KIMODO_GGUF_MODEL_PATH"] = str(assets.locate_gguf_file(gguf_dir))
+    elif plan.encoder_route == "full":
+        _ensure_asset_ready(
+            assets.FULL_BASE_ASSET,
+            plan.models_root / assets.FULL_BASE_ASSET.local_dir_name,
+            logger,
+            recovery_flag_dir,
+            download_counter,
+        )
+        _ensure_asset_ready(
+            assets.FULL_PEFT_ASSET,
+            plan.models_root / assets.FULL_PEFT_ASSET.local_dir_name,
+            logger,
+            recovery_flag_dir,
+            download_counter,
+        )
+    else:
+        _ensure_asset_ready(
+            assets.NF4_ASSET,
+            plan.models_root / assets.NF4_ASSET.local_dir_name,
+            logger,
+            recovery_flag_dir,
+            download_counter,
+        )
+
+    if assets.should_inject_once(
+        recovery_flag_dir,
+        "model_missing_after_download",
+        "KIMODO_TEST_INJECT_MODEL_MISSING_AFTER_DOWNLOAD_ONCE",
+    ):
+        logger.log(f"[TEST] Injected model-missing-once by archiving downloaded asset dir: {main_dir}")
+        assets.archive_path(main_dir, recycle_dir)
+
+    logger.log(
+        f"[bridge] asset plan complete: model={plan.resolved_model.local_name} "
+        f"encoder_route={plan.encoder_route} downloads={download_counter[0]}"
+    )
+    return plan
 
 
 def _rotation_mats_to_quat_wxyz(rot_mats: np.ndarray) -> np.ndarray:
@@ -784,6 +1067,8 @@ def main():
             use_gguf_encoder = True
         elif force_gguf_env == "0":
             use_gguf_encoder = False
+        elif str(args.device or "").strip().lower() == "cpu" and os.environ.get("KIMODO_CPU_TEXT_ENCODER", "").strip().lower() == "gguf":
+            use_gguf_encoder = True
         else:
             use_gguf_encoder = total_vram_gb < 6.0
 
@@ -803,6 +1088,21 @@ def main():
                 device = "cuda:0"
 
         _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} use_gguf_encoder={use_gguf_encoder}")
+
+        _set_loading_message("Checking local models...")
+        _out({"status": "loading", "message": "Checking local models..."})
+        try:
+            provision_plan = _provision_bridge_assets(
+                kimodo_root,
+                args.model,
+                use_gguf_encoder=use_gguf_encoder,
+            )
+        except Exception as exc:
+            with state_lock:
+                state["error"] = f"Model prepare failed: {exc}\n{traceback.format_exc()}"
+                state["loading"] = False
+            _log(f"[bridge] model prepare error {exc}")
+            return
 
         # Start llama.cpp GGUF text-encoder service when selected.
         if use_gguf_encoder:
@@ -841,11 +1141,12 @@ def main():
             # which would waste time trying to reach a non-existent port 9550.
             os.environ["TEXT_ENCODER_MODE"] = "local"
             _log("[bridge] local LLM2Vec text encoder selected (tier: vram>=6G).")
-        _set_loading_message(f"Loading {args.model} on {device}...")
-        _out({"status": "loading", "message": f"Loading {args.model} on {device}..."})
-        _log(f"[bridge] load stage: load_model start model={args.model} device={device}")
+        resolved_model_name = provision_plan.resolved_model.local_name
+        _set_loading_message(f"Loading {resolved_model_name} on {device}...")
+        _out({"status": "loading", "message": f"Loading {resolved_model_name} on {device}..."})
+        _log(f"[bridge] load stage: load_model start model={resolved_model_name} device={device}")
         try:
-            model = load_model(args.model, device=device)
+            model = load_model(resolved_model_name, device=device)
         except Exception as exc:
             with state_lock:
                 state["error"] = f"Model load failed: {exc}\n{traceback.format_exc()}"
@@ -861,10 +1162,10 @@ def main():
             state["loading"] = False
             state["error"] = ""
 
-        _log(f"[bridge] ready host={host} port={port} model={args.model} device={device}")
+        _log(f"[bridge] ready host={host} port={port} model={resolved_model_name} device={device}")
         _out({
             "status": "ready",
-            "model": args.model,
+            "model": resolved_model_name,
             "device": device,
             "fps": int(model.fps),
             "host": host,

@@ -23,10 +23,24 @@ cd /d C:\nvlab\NvlabKimodoQuickServer
 run_server.bat setup --output console
 ```
 
+Linux:
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer
+./run_server.sh setup --output console
+```
+
 ## Example
 ```bat
 cd /d C:\nvlab\NvlabKimodoQuickServer
 run_server.bat --model Kimodo-SOMA-RP-v1 --models-root C:\nvlab\models~ --output console
+```
+
+The bridge now provisions required model assets on demand during startup and logs download progress to `log\bridge_server.log`.
+
+Linux:
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer
+./run_server.sh --model Kimodo-SOMA-RP-v1 --models-root /mnt/c/nvlab/models~ --output console
 ```
 
 TCP smoke test:

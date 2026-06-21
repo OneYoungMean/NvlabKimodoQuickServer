@@ -1,14 +1,14 @@
 # NvlabKimodoQuickServer 参数说明
 
-## 1. `run_server.bat setup`
+## 1. `run_server.bat setup` / `run_server.sh setup`
 - `--output <console|file>`: 输出模式，默认 `console`。
 - `--log <path>`: `file` 模式下日志文件路径，默认 `log\setup.log`。
 - `--force`: 强制重新 setup（会归档旧 sentinel）。
 
-## 2. `run_server.bat`
+## 2. `run_server.bat` / `run_server.sh`
 - `--model <name|alias>`: 默认 `Kimodo-SOMA-RP-v1`。
 - `--highvram`: 启用 high-vram 模式。
-- `--models-root <path>`: 指定外部模型根目录（存在即跳过下载流程）。
+- `--models-root <path>`: 指定模型根目录；bridge 启动时会在这里检查并按需下载模型。
 - `--output <console|file>`: 输出模式，默认 `console`。
 - `--log <path>`: `file` 模式下主日志路径，默认 `log\bridge_server.log`。
 - `bridge_server` 主日志固定为 `log\bridge_server.log`。
@@ -27,7 +27,9 @@
 说明：
 - 默认启动等待窗口约 `180s`（`1s * 180`）。
 - 不做 `serverport` 回填、不做 TCP 探活；`serverport` 仅由 bridge server 写入。
-- `run_server.bat setup` 也是同一条 Python 入口的子命令，用于单独执行 setup。
+- `run_server.bat setup` / `run_server.sh setup` 都是同一条 Python 入口的子命令，用于单独执行 setup。
+- 模型准备链路已收敛到 `bridge_server`：启动后按 `模型类型 -> 本地存在检查 -> 下载 -> load_model()` 执行。
+- 下载进度会持续写入 `log\\bridge_server.log`，这样 watchdog 在下载期间也能看到活跃日志。
 
 ## 3. `example\example_run_server_tpose.bat`
 - 默认流程：后台启动 `run_server` -> 读取 `serverport` -> 发送 `ping/generate(tpose)/quit`。

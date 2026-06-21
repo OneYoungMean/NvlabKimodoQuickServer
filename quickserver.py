@@ -10,7 +10,7 @@ import sys
 from typing import Sequence
 
 
-SUBCOMMANDS = {"setup", "prepare-models", "run", "config-only"}
+SUBCOMMANDS = {"setup", "run"}
 
 
 def _root_dir() -> Path:
@@ -63,11 +63,9 @@ def _outer_parser() -> argparse.ArgumentParser:
 
 
 def _print_help() -> int:
-    print("Usage: python quickserver.py [setup|prepare-models|run|config-only] [options]")
+    print("Usage: python quickserver.py [setup|run] [options]")
     print("  setup           build or reuse the venv")
-    print("  prepare-models   download model assets only")
-    print("  run             setup + prepare-models + launch bridge")
-    print("  config-only     setup + prepare-models then exit")
+    print("  run             setup + launch bridge (bridge provisions models on demand)")
     return 0
 
 

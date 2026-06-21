@@ -23,10 +23,24 @@ cd /d C:\nvlab\NvlabKimodoQuickServer
 run_server.bat setup --output console
 ```
 
+Linux：
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer
+./run_server.sh setup --output console
+```
+
 ## Example
 ```bat
 cd /d C:\nvlab\NvlabKimodoQuickServer
 run_server.bat --model Kimodo-SOMA-RP-v1 --models-root C:\nvlab\models~ --output console
+```
+
+现在 bridge 会在启动时按需准备模型资产，并把下载进度持续写入 `log\bridge_server.log`。
+
+Linux：
+```bash
+cd /mnt/c/nvlab/NvlabKimodoQuickServer
+./run_server.sh --model Kimodo-SOMA-RP-v1 --models-root /mnt/c/nvlab/models~ --output console
 ```
 
 TCP 冒烟测试：
