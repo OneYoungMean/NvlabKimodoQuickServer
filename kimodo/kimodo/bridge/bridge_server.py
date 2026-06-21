@@ -542,25 +542,6 @@ def main():
             if state["loading"]:
                 state["loading_message"] = str(message)
 
-    def _initializing_heartbeat_worker():
-        while True:
-            with state_lock:
-                loading = bool(state["loading"])
-                message = str(state.get("loading_message", "Model is loading."))
-                started_at = float(state.get("loading_started_at", time.time()))
-            if not loading:
-                return
-
-            elapsed_seconds = max(0, int(time.time() - started_at))
-            _out(
-                {
-                    "status": "initializing",
-                    "message": message,
-                    "elapsed_seconds": elapsed_seconds,
-                }
-            )
-            time.sleep(1.0)
-
     def _load_model_worker():
         _set_loading_message("Importing Kimodo...")
         _out({"status": "loading", "message": "Importing Kimodo..."})
@@ -654,7 +635,6 @@ def main():
             "port": int(port)
         })
 
-    threading.Thread(target=_initializing_heartbeat_worker, daemon=True).start()
     threading.Thread(target=_load_model_worker, daemon=True).start()
 
     def _is_quitting() -> bool:
