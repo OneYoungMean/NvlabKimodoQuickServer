@@ -29,7 +29,7 @@ set "SETUP_LOG=%LOG_DIR%\test_cpu_setup.log"
 call :archive_file "%SETUP_LOG%"
 
 echo [STEP] setup cpu mode...
-set "KIMODO_TEST_SETUP_DEVICE=cpu"
+set "KIMODO_SETUP_DEVICE=cpu"
 call "%ROOT_DIR%\run_server.bat" setup --output file --log "%SETUP_LOG%"
 if errorlevel 1 (
   echo [ERROR] setup cpu failed.

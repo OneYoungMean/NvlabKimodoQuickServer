@@ -2,9 +2,9 @@
 
 ## Directory Rules
 
-- `test\`: top-level menus, runners, stress scripts, diagnostics, and compatibility wrappers.
+- `test\`: top-level menus, runners, stress scripts, diagnostics, and matrix entrypoints.
 - `test\cases\`: concrete reusable scenario scripts.
-- `archive\deprecated_tests\`: retired top-level test entrypoints.
+- `archive\deprecated_tests\`: retired top-level test entrypoints and compatibility wrappers.
 - `archive\deprecated_cases\`: retired case scripts.
 
 ## Recommended Entrypoints
@@ -42,14 +42,11 @@
 - `cases\case_local_tools_uv_git.bat`: bundled `uv`/`git`/`git-lfs` availability check.
 - `cases\case_uv_no_cache.bat`: no-cache `uv` environment/setup diagnostic.
 
-## Compatibility Wrappers
-
-- `test_cpu_prepared_models.bat`: legacy wrapper; real case lives in `cases\case_cpu_prepared_models.bat`.
-- `test_cpu_from_scratch.bat`: legacy wrapper; real case lives in `cases\case_cpu_from_scratch.bat`.
-- `test_recovery_matrix_parallel.bat`: legacy wrapper; now forwards to `test_recovery_matrix_serial.bat`.
-
 ## Archived
 
 - `archive\deprecated_tests\test_cpu_local_llama_route.bat`: retired GGUF/llama CPU route.
 - `archive\deprecated_tests\test_cpu_local_llama_route.ps1`: retired GGUF/llama CPU route.
+- `archive\deprecated_tests\test_cpu_prepared_models.bat`: retired top-level wrapper; use `cases\case_cpu_prepared_models.bat`.
+- `archive\deprecated_tests\test_cpu_from_scratch.bat`: retired top-level wrapper; use `cases\case_cpu_from_scratch.bat`.
+- `archive\deprecated_tests\test_recovery_matrix_parallel.bat`: retired wrapper; use `test_recovery_matrix_serial.bat`.
 - `archive\deprecated_cases\case_setup_not_started.bat`: older cold-start variant, superseded by `cases\case_cpu_from_scratch.bat`.

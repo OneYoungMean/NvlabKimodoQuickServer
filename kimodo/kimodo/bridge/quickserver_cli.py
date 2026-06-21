@@ -31,7 +31,6 @@ def _build_parser() -> argparse.ArgumentParser:
         run_parser.add_argument("--venv")
         run_parser.add_argument("--device")
         run_parser.add_argument("--force-setup", action="store_true")
-        run_parser.add_argument("--cpu-text-encoder", default=os.environ.get("KIMODO_CPU_TEXT_ENCODER", "int8"))
         run_parser.add_argument("--watchpid")
         run_parser.add_argument("--unlock-stale", action="store_true")
         run_parser.add_argument("--force", action="store_true")
@@ -94,7 +93,7 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
 
     resolved_model = assets.resolve_main_model(args.model)
     models_root, _using_external_models = assets.resolve_models_root(paths.root_dir, args.models_root)
-    runtime_hints = assets.normalize_runtime_hints(args.device, args.cpu_text_encoder)
+    runtime_hints = assets.normalize_runtime_hints(args.device)
     encoder_route = assets.choose_prepare_encoder_route(bool(args.highvram), runtime_hints)
     runtime_env = assets.build_runtime_env(
         root_dir=paths.root_dir,
@@ -102,7 +101,6 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
         models_root=models_root,
         highvram=bool(args.highvram),
         hints=runtime_hints,
-        cpu_text_encoder=args.cpu_text_encoder,
         encoder_route=encoder_route,
     )
     runtime_env.update(assets.build_offline_cache_env(paths.root_dir))
@@ -116,6 +114,7 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
         cache_dir.mkdir(parents=True, exist_ok=True)
 
     launch_env = os.environ.copy()
+    assets.scrub_removed_runtime_env(launch_env)
     launch_env.update(runtime_env)
     launch_env["KIMODO_BRIDGE_LOG"] = str(bridge_log_path)
     launch_env["KIMODO_BRIDGE_LOG_DIRECT_ONLY"] = "1" if args.output == "file" else "0"
@@ -138,7 +137,6 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
             popen_kwargs["stderr"] = bridge_log_stream
             launch_proc = subprocess.Popen(command, **popen_kwargs)
             bridge_pid_file.write_text(f"{launch_proc.pid}\n", encoding="utf-8", newline="\n")
-            runtime_env["KIMODO_BRIDGE_PID"] = str(launch_proc.pid)
             logger.log(f"[INFO] Model: {resolved_model.local_name}")
             logger.log(f"[INFO] Models root: {models_root}")
             logger.log(f"[INFO] Runtime device: {runtime_hints.normalized_device or '<auto>'}")
@@ -150,7 +148,6 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
     else:
         launch_proc = subprocess.Popen(command, **popen_kwargs)
         bridge_pid_file.write_text(f"{launch_proc.pid}\n", encoding="utf-8", newline="\n")
-        runtime_env["KIMODO_BRIDGE_PID"] = str(launch_proc.pid)
         logger.log(f"[INFO] Model: {resolved_model.local_name}")
         logger.log(f"[INFO] Models root: {models_root}")
         logger.log(f"[INFO] Runtime device: {runtime_hints.normalized_device or '<auto>'}")

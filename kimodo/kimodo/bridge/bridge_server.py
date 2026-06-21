@@ -164,10 +164,7 @@ def _build_bridge_provision_plan(
         os.environ.get("KIMODO_MODELS_ROOT"),
     )
     highvram = _env_flag("KIMODO_HIGHVRAM", False)
-    hints = assets.normalize_runtime_hints(
-        run_device,
-        os.environ.get("KIMODO_CPU_TEXT_ENCODER", "int8"),
-    )
+    hints = assets.normalize_runtime_hints(run_device)
     encoder_route = assets.choose_prepare_encoder_route(
         highvram,
         hints,
@@ -184,33 +181,19 @@ def _build_bridge_provision_plan(
 
 def _apply_bridge_runtime_env(kimodo_root: str, plan: _BridgeProvisionPlan) -> None:
     root_path = Path(kimodo_root).resolve()
-    models_root = plan.models_root
-    os.environ["PYTHONPATH"] = str(root_path / "kimodo")
-    os.environ["KIMODO_ROOT_PATH"] = str(root_path)
-    os.environ["CHECKPOINT_DIR"] = str(models_root)
-    os.environ["KIMODO_MODELS_ROOT"] = str(models_root)
-    os.environ["KIMODO_HIGHVRAM"] = "1" if plan.highvram else "0"
-    os.environ["LOCAL_CACHE"] = "true"
-
-    if plan.encoder_route == "int8":
-        os.environ["TEXT_ENCODER"] = "llm2vec_int8"
-        os.environ["KIMODO_CPU_TEXT_ENCODER"] = "int8"
-        os.environ["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = "cpu"
-        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / assets.INT8_LOCAL_DIR)
-        os.environ["TEXT_ENCODERS_DIR"] = ""
-        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = ""
-    elif plan.encoder_route == "full":
-        os.environ["TEXT_ENCODER"] = "llm2vec"
-        os.environ["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = "auto"
-        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / assets.FULL_BASE_LOCAL_DIR)
-        os.environ["TEXT_ENCODERS_DIR"] = str(models_root)
-        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = str(models_root / assets.FULL_PEFT_LOCAL_DIR)
-    else:
-        os.environ["TEXT_ENCODER"] = "llm2vec"
-        os.environ["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = "auto"
-        os.environ["KIMODO_LLM2VEC_DIR"] = str(models_root / assets.NF4_LOCAL_DIR)
-        os.environ["TEXT_ENCODERS_DIR"] = ""
-        os.environ["KIMODO_LLM2VEC_PEFT_DIR"] = ""
+    source_root = root_path / "kimodo"
+    if not (source_root / "pyproject.toml").is_file():
+        source_root = root_path
+    runtime_env = assets.build_runtime_env(
+        root_dir=root_path,
+        source_root=source_root,
+        models_root=plan.models_root,
+        highvram=plan.highvram,
+        hints=assets.normalize_runtime_hints("cpu" if plan.encoder_route == "int8" else None),
+        encoder_route=plan.encoder_route,
+    )
+    assets.scrub_removed_runtime_env(os.environ)
+    os.environ.update(runtime_env)
 
 
 def _provision_bridge_assets(
@@ -636,15 +619,8 @@ def main():
         _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} encoder_route={provision_plan.encoder_route}")
 
         if use_int8_encoder:
-            os.environ["TEXT_ENCODER"] = "llm2vec_int8"
-            os.environ["TEXT_ENCODER_MODE"] = "local"
-            os.environ["KIMODO_CPU_TEXT_ENCODER"] = "int8"
-            os.environ["TEXT_ENCODER_DEVICE"] = "cpu"
             _log("[bridge] local INT8 text encoder selected (tier: vram<6G).")
         else:
-            os.environ["TEXT_ENCODER"] = "llm2vec"
-            os.environ["TEXT_ENCODER_MODE"] = "local"
-            os.environ["TEXT_ENCODER_DEVICE"] = "auto"
             _log("[bridge] local LLM2Vec text encoder selected (tier: vram>=6G).")
 
         resolved_model_name = provision_plan.resolved_model.local_name

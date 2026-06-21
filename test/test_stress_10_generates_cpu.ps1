@@ -22,8 +22,8 @@ if (-not (Test-Path -LiteralPath $ModelsRoot)) { throw "Models root not found: $
 if (-not $env:UV_CACHE_DIR) {
     $env:UV_CACHE_DIR = Join-Path $root ".uv-cache"
 }
-if (-not $env:KIMODO_TEST_VENV_PATH) {
-    $env:KIMODO_TEST_VENV_PATH = Join-Path $root "kimodo\.venv"
+if (-not $env:KIMODO_VENV_PATH) {
+    $env:KIMODO_VENV_PATH = Join-Path $root "kimodo\.venv"
 }
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -34,8 +34,7 @@ if (Test-Path -LiteralPath $portFile) {
     Move-Item -LiteralPath $portFile -Destination $bak -Force
 }
 
-$env:KIMODO_CPU_TEXT_ENCODER = "int8"
-$env:KIMODO_TEST_SETUP_DEVICE = "cpu"
+$env:KIMODO_SETUP_DEVICE = "cpu"
 $runCmd = "call `"$runBat`" --model `"$ModelName`" --device cpu --models-root `"$ModelsRoot`" --output file --log `"$runLog`""
 $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/c", $runCmd) -WorkingDirectory $root -WindowStyle Normal -PassThru
 

@@ -85,8 +85,8 @@ rem Device policy: empty = auto (let run_server/bridge pick GPU when available,
 rem else CPU). Only an explicit cpu request drives setup into CPU mode. We no longer
 rem default to "cuda" -- passing cuda explicitly would bypass auto-detection.
 set "RUN_DEVICE=%KIMODO_TEST_DEVICE%"
-set "KIMODO_TEST_SETUP_DEVICE="
-if /I "%RUN_DEVICE%"=="cpu" set "KIMODO_TEST_SETUP_DEVICE=cpu"
+set "KIMODO_SETUP_DEVICE="
+if /I "%RUN_DEVICE%"=="cpu" set "KIMODO_SETUP_DEVICE=cpu"
 set "KIMODO_TEST_SCENARIO_NAME=%CASE_NAME%"
 
 set "KIMODO_TEST_WAIT_TIMEOUT_SEC=%RUN1_WAIT_TIMEOUT_SEC%"
@@ -269,5 +269,4 @@ set "DETAIL=%~2"
   echo RUN_ROOT=%RUN_ROOT%
 )
 exit /b 0
-
 

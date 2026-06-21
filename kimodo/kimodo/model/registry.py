@@ -194,7 +194,7 @@ def get_model_info(short_key: str) -> Optional[ModelInfo]:
     """Return ModelInfo for a short key, or None if not found.
 
     When multiple versions share the same short_key, returns the one used for loading (the latest
-    version), so CHECKPOINT_DIR and HF use the same version.
+    version), so KIMODO_MODELS_ROOT and HF use the same version.
     """
     repo_id = MODEL_NAMES.get(short_key)
     if repo_id is None:

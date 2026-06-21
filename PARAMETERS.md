@@ -5,19 +5,21 @@
 - `--log <path>`: `file` 模式下日志文件路径，默认 `log\setup.log`。
 - `--force`: 强制重新 setup（会归档旧 sentinel）。
 
+关键 setup 变量：
+- `KIMODO_SETUP_DEVICE=auto|cpu`: setup 安装模式；设为 `cpu` 时强制准备 CPU torch 环境。
+- `KIMODO_VENV_PATH=<path>`: 复用指定虚拟环境；等价于启动时自动补 `--venv <path>`。
+
 ## 2. `run_server.bat` / `run_server.sh`
 - `--model <name|alias>`: 默认 `Kimodo-SOMA-RP-v1`。
 - `--highvram`: 启用 high-vram 模式。
 - `--models-root <path>`: 指定外部模型根目录（存在即跳过下载流程）。
 - `--output <console|file>`: 输出模式，默认 `console`。
 - `--log <path>`: `file` 模式下主日志路径，默认 `log\bridge_server.log`。
-- `--cpu-text-encoder <int8>`: CPU / 低显存路径使用的文本编码器，默认 `int8`。`gguf` 已废弃并会直接报错。
 - `bridge_server` 主日志固定为 `log\bridge_server.log`。
 - `--force-setup`: 归档 setup sentinel 后重新 setup。
 
 关键运行变量：
 - `KIMODO_MODELS_ROOT`: 默认 models 根目录（可被 `--models-root` 覆盖）。
-- `KIMODO_CPU_TEXT_ENCODER=int8`: 指定 CPU 文本编码器路线，当前仅支持 `int8`。
 - `KIMODO_IDLE_TIMEOUT_SEC`: 服务空闲退出秒数（当前设定 `600`）。
 
 INT8 资产说明：
@@ -36,6 +38,13 @@ INT8 资产说明：
 - 默认启动等待窗口约 `180s`（`1s * 180`）。
 - 不做 `serverport` 回填、不做 TCP 探活；`serverport` 仅由 bridge server 写入。
 - `run_server.bat setup` / `run_server.sh setup` 都是同一条 Python 入口的子命令，用于单独执行 setup。
+
+已移除变量：
+- `CHECKPOINT_DIR`: 改用 `KIMODO_MODELS_ROOT`。
+- `KIMODO_CPU_TEXT_ENCODER`: CPU 文本编码器不再由外部选择，QuickServer 会自动切到本地 INT8。
+- `KIMODO_TEXT_ENCODER_DEVICE_HINT`: QuickServer 直接写入 `TEXT_ENCODER_DEVICE`，不再接受该提示变量。
+- `KIMODO_TEST_SETUP_DEVICE`: 改用 `KIMODO_SETUP_DEVICE`。
+- `KIMODO_TEST_VENV_PATH`: 改用 `KIMODO_VENV_PATH`。
 
 ## 3. `example\example_run_server_tpose.bat`
 - 默认流程：后台启动 `run_server` -> 读取 `serverport` -> 发送 `ping/generate(tpose)/quit`。

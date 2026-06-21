@@ -111,7 +111,10 @@ def discover_project_paths(root_dir: str | os.PathLike[str] | None = None) -> Pr
 
 
 def setup_mode_from_env(requested_mode: str | None) -> str:
-    value = requested_mode or os.environ.get("KIMODO_SETUP_DEVICE") or os.environ.get("KIMODO_TEST_SETUP_DEVICE") or "auto"
+    legacy_value = os.environ.get("KIMODO_TEST_SETUP_DEVICE", "").strip()
+    if legacy_value:
+        raise SetupError("KIMODO_TEST_SETUP_DEVICE has been removed. Use KIMODO_SETUP_DEVICE.")
+    value = requested_mode or os.environ.get("KIMODO_SETUP_DEVICE") or "auto"
     return "cpu" if str(value).strip().lower() == "cpu" else "auto"
 
 
@@ -598,7 +601,13 @@ def _setup_buildenv(paths: ProjectPaths, setup_mode: str, logger: SetupLogger) -
 def run_setup_cli(root_dir: str | os.PathLike[str], options: SetupCliOptions) -> SetupCliResult:
     paths = discover_project_paths(root_dir)
     paths.log_dir.mkdir(parents=True, exist_ok=True)
-    requested_mode = setup_mode_from_env(options.requested_mode)
+    try:
+        requested_mode = setup_mode_from_env(options.requested_mode)
+    except SetupError as exc:
+        log_path = Path(options.log_path).resolve() if options.log_path else paths.default_setup_log_path
+        with SetupLogger(options.output_mode or "console", log_path) as logger:
+            logger.log(f"[ERROR] {exc}")
+        return SetupCliResult(ok=False, exit_code=1, venv_python="")
 
     if options.venv_arg:
         python_path = resolve_venv_python_arg(options.venv_arg, root_dir=root_dir)

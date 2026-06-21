@@ -25,15 +25,14 @@ if not defined RUNSERVER_EXIT_GRACE_SEC set "RUNSERVER_EXIT_GRACE_SEC=15"
 set "MODEL=Kimodo-SOMA-RP-v1"
 if defined KIMODO_TEST_MODEL set "MODEL=%KIMODO_TEST_MODEL%"
 rem Device policy: only an explicit CPU request is forwarded as --device cpu (it is
-rem a mode switch that drives setup to install the cpu torch build and enables the
-rem gguf text encoder). Otherwise DEVICE stays empty and we do NOT pass --device at
+rem a mode switch that drives setup to install the cpu torch build and pins the
+rem local INT8 text encoder to CPU). Otherwise DEVICE stays empty and we do NOT pass --device at
 rem all -- run_server/bridge then auto-select via torch.cuda.is_available()
 rem (GPU when present, CPU fallback when not). Passing "cuda" explicitly is avoided
 rem because it would bypass that auto-detection and crash on CPU-only machines.
 set "DEVICE="
 if /I "%KIMODO_TEST_DEVICE%"=="cpu" set "DEVICE=cpu"
 set "MODELS_ROOT=%KIMODO_TEST_MODELS_ROOT%"
-set "USE_VENV_ARG=0"
 
 if not exist "!LAUNCHER!" (
   echo [ERROR] run_server.bat not found: !LAUNCHER!
@@ -46,9 +45,9 @@ if not exist "!CLIENT_PS1!" (
 if not exist "!ROOT_DIR!\log" mkdir "!ROOT_DIR!\log" >nul 2>nul
 if not exist "!RECYCLE_DIR!" mkdir "!RECYCLE_DIR!" >nul 2>nul
 
-set "KIMODO_TEST_SETUP_DEVICE="
+set "KIMODO_SETUP_DEVICE="
 if defined KIMODO_TEST_DEVICE (
-  if /I "%KIMODO_TEST_DEVICE%"=="cpu" set "KIMODO_TEST_SETUP_DEVICE=cpu"
+  if /I "%KIMODO_TEST_DEVICE%"=="cpu" set "KIMODO_SETUP_DEVICE=cpu"
 )
 
 echo [TEST] ROOT_DIR=!ROOT_DIR!
@@ -63,7 +62,11 @@ if defined MODELS_ROOT (
 ) else (
   echo [TEST] MODELS_ROOT=^<default^>
 )
-echo [TEST] VENV_PATH=^<disabled^>
+if defined KIMODO_VENV_PATH (
+  echo [TEST] VENV_PATH=!KIMODO_VENV_PATH!
+) else (
+  echo [TEST] VENV_PATH=^<default^>
+)
 echo [TEST] OUTPUT=file
 
 call :archive_file "%PORT_FILE%"

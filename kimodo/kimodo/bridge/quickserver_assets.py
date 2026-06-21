@@ -55,9 +55,19 @@ class ResolvedModel:
 @dataclass(frozen=True)
 class RuntimeHints:
     normalized_device: str | None
-    setup_mode: str
-    text_encoder_device_hint: str
-    cpu_text_encoder: str
+
+
+REMOVED_QUICKSERVER_ENV_VARS: dict[str, str] = {
+    "CHECKPOINT_DIR": "QuickServer now uses KIMODO_MODELS_ROOT for local-only model loading; remove CHECKPOINT_DIR.",
+    "KIMODO_CPU_TEXT_ENCODER": "QuickServer now auto-selects the local text encoder route; remove this variable.",
+    "KIMODO_TEXT_ENCODER_DEVICE_HINT": "QuickServer now drives TEXT_ENCODER_DEVICE directly; remove this variable.",
+}
+PURGED_RUNTIME_ENV_VARS: tuple[str, ...] = (
+    "CHECKPOINT_DIR",
+    "KIMODO_CPU_TEXT_ENCODER",
+    "KIMODO_TEXT_ENCODER_DEVICE_HINT",
+    "KIMODO_BRIDGE_PID",
+)
 
 
 MAIN_MODELS: tuple[MainModelSpec, ...] = (
@@ -152,18 +162,6 @@ def resolve_main_model(requested_name: str | None) -> ResolvedModel:
     raise ValueError(f"Unsupported model alias: {raw_name}")
 
 
-def validate_cpu_text_encoder(cpu_text_encoder: str | None) -> str:
-    normalized = str(cpu_text_encoder or "int8").strip().lower() or "int8"
-    if normalized == "gguf":
-        raise ValueError(
-            "GGUF text encoder route has been removed. "
-            "Use --cpu-text-encoder int8 (or KIMODO_CPU_TEXT_ENCODER=int8)."
-        )
-    if normalized != "int8":
-        raise ValueError(f"Unsupported --cpu-text-encoder value: {cpu_text_encoder!r}. Only 'int8' is supported.")
-    return normalized
-
-
 def assert_no_legacy_gguf_env() -> None:
     active = [name for name in LEGACY_GGUF_ENV_VARS if os.environ.get(name, "").strip()]
     if active:
@@ -173,20 +171,28 @@ def assert_no_legacy_gguf_env() -> None:
         )
 
 
-def normalize_runtime_hints(run_device: str | None, cpu_text_encoder: str) -> RuntimeHints:
+def assert_no_removed_quickserver_env() -> None:
+    active = [name for name in REMOVED_QUICKSERVER_ENV_VARS if os.environ.get(name, "").strip()]
+    if active:
+        details = "; ".join(f"{name}: {REMOVED_QUICKSERVER_ENV_VARS[name]}" for name in active)
+        raise ValueError(f"Removed QuickServer environment variables are no longer supported. {details}")
+
+
+def scrub_removed_runtime_env(env: dict[str, str] | os._Environ[str]) -> None:
+    for name in PURGED_RUNTIME_ENV_VARS:
+        env.pop(name, None)
+
+
+def normalize_runtime_hints(run_device: str | None) -> RuntimeHints:
     normalized_device: str | None = None
-    setup_mode = "auto"
-    text_encoder_device_hint = "auto"
-    normalized_cpu_encoder = validate_cpu_text_encoder(cpu_text_encoder)
     assert_no_legacy_gguf_env()
+    assert_no_removed_quickserver_env()
 
     raw_device = str(run_device or "").strip()
     if raw_device:
         lowered = raw_device.lower()
         if lowered == "cpu":
             normalized_device = "cpu"
-            setup_mode = "cpu"
-            text_encoder_device_hint = "cpu"
         elif lowered == "cuda":
             normalized_device = "cuda:0"
         elif lowered.startswith("cuda"):
@@ -195,9 +201,6 @@ def normalize_runtime_hints(run_device: str | None, cpu_text_encoder: str) -> Ru
             raise ValueError(f"Invalid --device value: {run_device}")
     return RuntimeHints(
         normalized_device=normalized_device,
-        setup_mode=setup_mode,
-        text_encoder_device_hint=text_encoder_device_hint,
-        cpu_text_encoder=normalized_cpu_encoder,
     )
 
 
@@ -534,38 +537,34 @@ def build_runtime_env(
     models_root: str | os.PathLike[str],
     highvram: bool,
     hints: RuntimeHints,
-    cpu_text_encoder: str,
     encoder_route: str | None = None,
-    gguf_model_path: str | None = None,
-    gguf_ctx: str | None = None,
 ) -> dict[str, str]:
     root = Path(root_dir).resolve()
     models_path = Path(models_root).resolve()
-    normalized_cpu_encoder = validate_cpu_text_encoder(cpu_text_encoder)
     selected_encoder_route = encoder_route or choose_prepare_encoder_route(highvram, hints)
 
     env: dict[str, str] = {
         "PYTHONPATH": str(Path(source_root).resolve()),
         "KIMODO_ROOT_PATH": str(root),
-        "CHECKPOINT_DIR": str(models_path),
         "KIMODO_MODELS_ROOT": str(models_path),
         "KIMODO_HIGHVRAM": "1" if highvram else "0",
         "LOCAL_CACHE": "true",
         "TEXT_ENCODER": "llm2vec_int8" if selected_encoder_route == "int8" else "llm2vec",
-        "KIMODO_CPU_TEXT_ENCODER": normalized_cpu_encoder,
+        "TEXT_ENCODER_MODE": "local",
     }
-    if hints.text_encoder_device_hint:
-        env["KIMODO_TEXT_ENCODER_DEVICE_HINT"] = hints.text_encoder_device_hint
 
     if selected_encoder_route == "full" and highvram:
+        env["TEXT_ENCODER_DEVICE"] = "auto"
         env["KIMODO_LLM2VEC_DIR"] = str(models_path / FULL_BASE_LOCAL_DIR)
         env["TEXT_ENCODERS_DIR"] = str(models_path)
         env["KIMODO_LLM2VEC_PEFT_DIR"] = str(models_path / FULL_PEFT_LOCAL_DIR)
     elif selected_encoder_route == "nf4":
+        env["TEXT_ENCODER_DEVICE"] = "auto"
         env["KIMODO_LLM2VEC_DIR"] = str(models_path / NF4_LOCAL_DIR)
         env["TEXT_ENCODERS_DIR"] = ""
         env["KIMODO_LLM2VEC_PEFT_DIR"] = ""
     else:
+        env["TEXT_ENCODER_DEVICE"] = "cpu"
         env["KIMODO_LLM2VEC_DIR"] = str(models_path / INT8_LOCAL_DIR)
         env["TEXT_ENCODERS_DIR"] = ""
         env["KIMODO_LLM2VEC_PEFT_DIR"] = ""

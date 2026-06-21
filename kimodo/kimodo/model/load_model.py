@@ -42,7 +42,7 @@ TEXT_ENCODER_PRESETS = {
 
 
 def _resolve_hf_model_path(modelname: str) -> Path:
-    """Resolve model name to a local path, using Hugging Face cache or CHECKPOINT_DIR."""
+    """Resolve model name to a local path, using Hugging Face cache or KIMODO_MODELS_ROOT."""
     try:
         repo_id = MODEL_NAMES[modelname]
     except KeyError:
@@ -170,20 +170,22 @@ def load_model(
 
     resolved_modelname = modelname
 
-    # In case, we specify a custom checkpoint directory
-    configured_checkpoint_dir = get_env_var("CHECKPOINT_DIR")
-    if configured_checkpoint_dir:
-        print(f"CHECKPOINT_DIR is set to {configured_checkpoint_dir}, using local-only model loading...")
+    configured_models_root = get_env_var("KIMODO_MODELS_ROOT")
+    removed_checkpoint_dir = get_env_var("CHECKPOINT_DIR")
+    if removed_checkpoint_dir:
+        raise ValueError("CHECKPOINT_DIR has been removed. Use KIMODO_MODELS_ROOT instead.")
+    if configured_models_root:
+        print(f"KIMODO_MODELS_ROOT is set to {configured_models_root}, using local-only model loading...")
         # Checkpoint folders are named by display name (e.g. Kimodo-SOMA-RP-v1)
         info = get_model_info(modelname)
         checkpoint_folder_name = info.display_name if info is not None else modelname
-        model_path = Path(configured_checkpoint_dir) / checkpoint_folder_name
+        model_path = Path(configured_models_root) / checkpoint_folder_name
         if not model_path.exists() and modelname != checkpoint_folder_name:
             # Fallback: try short_key for backward compatibility
-            model_path = Path(configured_checkpoint_dir) / modelname
+            model_path = Path(configured_models_root) / modelname
         if not model_path.exists():
             raise FileNotFoundError(
-                f"Model folder not found at '{model_path}' while CHECKPOINT_DIR is configured. "
+                f"Model folder not found at '{model_path}' while KIMODO_MODELS_ROOT is configured. "
                 "Local-only mode does not fallback to Hugging Face."
             )
     else:

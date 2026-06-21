@@ -10,7 +10,7 @@ set "COPY_BAT=%TEST_DIR%\copy_to_test_timestamp.bat"
 set "DEST_INFO_FILE=%TEMP%\kimodo_case_cpu_manual_stop_dest_%RANDOM%%RANDOM%.txt"
 
 set "KIMODO_TEST_DEVICE=cpu"
-set "KIMODO_TEST_SETUP_DEVICE=cpu"
+set "KIMODO_SETUP_DEVICE=cpu"
 set "KIMODO_COPY_ONLY=1"
 set "KIMODO_COPY_DEST_FILE=%DEST_INFO_FILE%"
 call "%COPY_BAT%"
@@ -49,10 +49,10 @@ if not defined RUN_PID goto fail_launch
 timeout /t 5 /nobreak >nul
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $pidValue='%RUN_PID%'; if($pidValue -match '^\d+$'){ Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue }"
 timeout /t 2 /nobreak >nul
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $root='%RUN_ROOT%'; $targets='cmd.exe','python.exe','powershell.exe','llama-server.exe','uv.exe','git.exe','git-lfs.exe'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \"*$root*\" -and ($targets -contains $_.Name.ToLowerInvariant()) } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $root='%RUN_ROOT%'; $targets='cmd.exe','python.exe','powershell.exe','uv.exe','git.exe','git-lfs.exe'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \"*$root*\" -and ($targets -contains $_.Name.ToLowerInvariant()) } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }"
 set /a CLEAN_WAIT=0
 :wait_residual_processes
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $root='%RUN_ROOT%'; $targets='cmd.exe','python.exe','powershell.exe','llama-server.exe','uv.exe','git.exe','git-lfs.exe'; $ps=Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \"*$root*\" -and ($targets -contains $_.Name.ToLowerInvariant()) }; if($ps){ exit 1 } else { exit 0 }" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $root='%RUN_ROOT%'; $targets='cmd.exe','python.exe','powershell.exe','uv.exe','git.exe','git-lfs.exe'; $ps=Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \"*$root*\" -and ($targets -contains $_.Name.ToLowerInvariant()) }; if($ps){ exit 1 } else { exit 0 }" >nul 2>nul
 if not errorlevel 1 goto residual_cleared
 timeout /t 1 /nobreak >nul
 set /a CLEAN_WAIT+=1
@@ -65,7 +65,7 @@ if exist "%RUN_ROOT%\log\example_run_server_tpose.pid" move "%RUN_ROOT%\log\exam
 if exist "%RUN_ROOT%\serverport" move "%RUN_ROOT%\serverport" "%RUN_ROOT%\archive\recycle\serverport.manual.%RANDOM%%RANDOM%" >nul 2>nul
 
 pushd "%RUN_ROOT%" >nul
-set "KIMODO_TEST_SETUP_DEVICE=cpu"
+set "KIMODO_SETUP_DEVICE=cpu"
 call "%RUN_ROOT%\run_server.bat" setup --force --output file --log "%RUN_ROOT%\log\setup.log"
 set "RECOVER_SETUP_RC=%ERRORLEVEL%"
 popd >nul
