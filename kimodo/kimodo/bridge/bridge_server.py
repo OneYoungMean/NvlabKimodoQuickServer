@@ -529,7 +529,7 @@ def main():
         "loading_started_at": time.time(),
     }
     state_lock = threading.Lock()
-    idle_timeout_seconds = max(1, int(float(os.environ.get("KIMODO_IDLE_TIMEOUT_SEC", "600"))))
+    idle_timeout_seconds = max(0, int(float(os.environ.get("KIMODO_IDLE_TIMEOUT_SEC", "600"))))
     last_command_ts = time.time()
     last_command_lock = threading.Lock()
     active_command_count = 0
@@ -670,7 +670,7 @@ def main():
                 continue
             with last_command_lock:
                 idle_seconds = time.time() - last_command_ts
-            if idle_seconds >= idle_timeout_seconds:
+            if idle_timeout_seconds > 0 and idle_seconds >= idle_timeout_seconds:
                 _log(
                     f"[bridge] idle timeout reached: {int(idle_seconds)}s >= {idle_timeout_seconds}s, shutting down"
                 )
