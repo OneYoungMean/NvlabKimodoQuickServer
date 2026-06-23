@@ -688,6 +688,7 @@ def ensure_asset_present(
     recovery_flag_dir: Path,
     download_counter: list[int],
     *,
+    force_site: DownloadSite | None = None,
     allow_download: bool = True,
 ) -> None:
     if asset_is_ready(asset, target_dir):
@@ -713,6 +714,21 @@ def ensure_asset_present(
             f"repo={selected_repo_id or '<missing>'}"
         )
         download_via_modelscope(asset, target_dir, logger)
+    elif force_site is not None:
+        selected_site = force_site
+        selected_repo_id = _download_site_repo_id(asset, selected_site)
+        if not selected_repo_id:
+            raise RuntimeError(
+                f"Forced download site '{selected_site.value}' is unavailable for {asset.label}: missing repo id."
+            )
+        logger.log(
+            f"[INFO] {asset.label}: forced download site={selected_site.value} "
+            f"repo={selected_repo_id}"
+        )
+        if selected_site == DownloadSite.HUGGINGFACE:
+            download_via_huggingface(asset, target_dir)
+        else:
+            download_via_modelscope(asset, target_dir, logger)
     else:
         logger.log(
             f"[INFO] {asset.label}: probing download sites before transfer "
