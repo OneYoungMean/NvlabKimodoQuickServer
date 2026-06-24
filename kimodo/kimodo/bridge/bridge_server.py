@@ -510,10 +510,13 @@ def _build_generate_response(model: Any, output: dict, prompt: str, sample_index
     if local_rot_mats is None:
         raise ValueError("BVH export requires local rotations, but none were available in model output.")
 
+    import torch
+
     root_idx = int(getattr(skeleton, "root_idx", 0))
-    root_positions = sample_joints[:, root_idx, :]
+    local_rot_mats_t = torch.as_tensor(local_rot_mats, dtype=torch.float32)
+    root_positions = torch.as_tensor(sample_joints[:, root_idx, :], dtype=torch.float32)
     bvh_text = motion_to_bvh(
-        local_rot_mats,
+        local_rot_mats_t,
         root_positions,
         skeleton=skeleton,
         fps=float(model.fps),
