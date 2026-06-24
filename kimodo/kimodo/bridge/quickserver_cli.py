@@ -104,6 +104,7 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
     models_root, _using_external_models = assets.resolve_models_root(paths.root_dir, args.models_root)
     runtime_hints = assets.normalize_runtime_hints(args.device)
     encoder_route = assets.choose_prepare_encoder_route(bool(args.highvram), runtime_hints)
+    encoder_layout = assets.select_text_encoder_layout_for_route(encoder_route, models_root)
     runtime_env = assets.build_runtime_env(
         root_dir=paths.root_dir,
         source_root=paths.source_root,
@@ -111,6 +112,7 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
         highvram=bool(args.highvram),
         hints=runtime_hints,
         encoder_route=encoder_route,
+        encoder_layout_id=encoder_layout.layout_id,
     )
     runtime_env.update(assets.build_offline_cache_env(paths.root_dir))
     runtime_env["KIMODO_IDLE_TIMEOUT_SEC"] = os.environ.get("KIMODO_IDLE_TIMEOUT_SEC", "600")
@@ -155,8 +157,11 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
             logger.log(f"[INFO] Models root: {models_root}")
             logger.log(f"[INFO] Runtime device: {runtime_hints.normalized_device or '<auto>'}")
             logger.log(f"[INFO] Text encoder route: {encoder_route}")
+            logger.log(f"[INFO] Text encoder layout: {encoder_layout.layout_id}")
             logger.log(f"[INFO] Force HF download: {bool(args.force_hf_download)}")
             logger.log(f"[INFO] Text encoder dir: {runtime_env['KIMODO_LLM2VEC_DIR']}")
+            if runtime_env["KIMODO_LLM2VEC_PEFT_DIR"]:
+                logger.log(f"[INFO] Text encoder PEFT dir: {runtime_env['KIMODO_LLM2VEC_PEFT_DIR']}")
             logger.log(f"[INFO] Bridge PID: {launch_proc.pid}")
             watchdog_rc = _run_watchdog(paths, launch_proc.pid, port_file, bridge_log_path, launch_env, args.watchpid)
             launch_proc.poll()
@@ -167,8 +172,11 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
         logger.log(f"[INFO] Models root: {models_root}")
         logger.log(f"[INFO] Runtime device: {runtime_hints.normalized_device or '<auto>'}")
         logger.log(f"[INFO] Text encoder route: {encoder_route}")
+        logger.log(f"[INFO] Text encoder layout: {encoder_layout.layout_id}")
         logger.log(f"[INFO] Force HF download: {bool(args.force_hf_download)}")
         logger.log(f"[INFO] Text encoder dir: {runtime_env['KIMODO_LLM2VEC_DIR']}")
+        if runtime_env["KIMODO_LLM2VEC_PEFT_DIR"]:
+            logger.log(f"[INFO] Text encoder PEFT dir: {runtime_env['KIMODO_LLM2VEC_PEFT_DIR']}")
         logger.log(f"[INFO] Bridge PID: {launch_proc.pid}")
         watchdog_rc = _run_watchdog(paths, launch_proc.pid, port_file, bridge_log_path, launch_env, args.watchpid)
         launch_proc.poll()

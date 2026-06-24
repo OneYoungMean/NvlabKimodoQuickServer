@@ -12,7 +12,7 @@
 ## 2. `run_server.bat` / `run_server.sh`
 - `--model <name|alias>`: 默认 `Kimodo-SOMA-RP-v1`。
 - `--highvram`: 启用 high-vram 模式。
-- `--force-hf-download`: 对允许竞速的资产强制使用 Hugging Face 下载；`highvram/full` 资产仍固定走 ModelScope。
+- `--force-hf-download`: 对允许竞速的资产强制使用 Hugging Face 下载；包括 `highvram/fp16` 的 FP16 文本编码器；若命中 legacy 本地兼容布局，则不会触发下载。
 - `--models-root <path>`: 指定外部模型根目录（存在即跳过下载流程）。
 - `--output <console|file>`: 输出模式，默认 `console`。
 - `--log <path>`: `file` 模式下主日志路径，默认 `log\bridge_server.log`。
@@ -22,13 +22,20 @@
 关键运行变量：
 - `KIMODO_MODELS_ROOT`: 默认 models 根目录（可被 `--models-root` 覆盖）。
 - `KIMODO_IDLE_TIMEOUT_SEC`: 服务空闲退出秒数（当前设定 `600`）。
-- 下载站点默认是自动探测 HF / ModelScope 后择优；`--force-hf-download` 会跳过探测并强制走 HF，但不影响 `highvram/full` 路径的 ModelScope 固定策略。
+- 下载站点默认是自动探测 HF / ModelScope 后择优；`--force-hf-download` 会跳过探测并强制走 HF。
 
 INT8 资产说明：
 - 默认低显存文本编码器目录为 `models\KIMODO-Meta3_llm2vec_INT8`。
 - 若本地已有 `C:\nvlab\LLMVec-GGUF\KIMODO-Meta3_llm2vec_FP16`，可先执行 `tools\build_llm2vec_int8.py` 生成 INT8 资产。
 - 对默认 `models\` 目录：若缺少 INT8 资产，会尝试从 `oneyoungmean/KIMODO-Meta3_llm2vec_INT8` 下载。
 - 对外部 `--models-root`：不会自动下载，缺失时直接报错。
+
+文本编码器路由说明：
+- CPU 或显存 `< 6GB`：使用 `models\KIMODO-Meta3_llm2vec_INT8`
+- GPU 且显存 `>= 6GB`，未开启 `--highvram`：使用 `models\KIMODO-Meta3_llm2vec_NF4`
+- GPU 且显存 `>= 6GB`，开启 `--highvram`：
+  - 若同时存在且有效：`models\Meta-Llama-3-8B-Instruct` + `models\LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised`，优先走 legacy 本地兼容加载
+  - 否则使用 `models\KIMODO-Meta3_llm2vec_FP16`
 
 ### 启动与 watchdog
 - `KIMODO_WATCHDOG_STARTUP_INTERVAL_SEC`: 启动阶段等待 `serverport` 的轮询间隔（默认 `1` 秒）。

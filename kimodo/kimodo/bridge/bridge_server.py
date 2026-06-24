@@ -117,6 +117,7 @@ class _BridgeProvisionPlan:
     using_external_models: bool
     highvram: bool
     encoder_route: str
+    text_encoder_layout: assets.TextEncoderLayoutSpec
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -172,12 +173,14 @@ def _build_bridge_provision_plan(
         hints,
         total_vram_gb=total_vram_gb,
     )
+    text_encoder_layout = assets.select_text_encoder_layout_for_route(encoder_route, models_root)
     return _BridgeProvisionPlan(
         resolved_model=resolved_model,
         models_root=models_root,
         using_external_models=using_external_models,
         highvram=highvram,
         encoder_route=encoder_route,
+        text_encoder_layout=text_encoder_layout,
     )
 
 
@@ -193,6 +196,7 @@ def _apply_bridge_runtime_env(kimodo_root: str, plan: _BridgeProvisionPlan) -> N
         highvram=plan.highvram,
         hints=assets.normalize_runtime_hints("cpu" if plan.encoder_route == "int8" else None),
         encoder_route=plan.encoder_route,
+        encoder_layout_id=plan.text_encoder_layout.layout_id,
     )
     assets.scrub_removed_runtime_env(os.environ)
     os.environ.update(runtime_env)
@@ -225,7 +229,17 @@ def _provision_bridge_assets(
     logger.log(
         f"[bridge] asset plan: model={plan.resolved_model.local_name} "
         f"models_root={plan.models_root} encoder_route={plan.encoder_route} "
+        f"encoder_layout={plan.text_encoder_layout.layout_id} "
         f"external_models_root={plan.using_external_models}"
+    )
+    encoder_primary_dir, encoder_peft_dir = assets.resolve_text_encoder_layout_paths(
+        plan.text_encoder_layout,
+        plan.models_root,
+    )
+    logger.log(
+        f"[INFO] Text encoder layout selected: {plan.text_encoder_layout.layout_id} "
+        f"label={plan.text_encoder_layout.label} primary={encoder_primary_dir}"
+        + (f" peft={encoder_peft_dir}" if encoder_peft_dir is not None else "")
     )
 
     main_asset = assets.AssetSpec(
@@ -245,12 +259,7 @@ def _provision_bridge_assets(
         allow_download=allow_download,
     )
 
-    if plan.encoder_route == "int8":
-        encoder_assets = [assets.INT8_ASSET]
-    elif plan.encoder_route == "full":
-        encoder_assets = [assets.FULL_BASE_ASSET, assets.FULL_PEFT_ASSET]
-    else:
-        encoder_assets = [assets.NF4_ASSET]
+    encoder_assets = list(plan.text_encoder_layout.download_assets)
 
     for encoder_asset in encoder_assets:
         _ensure_asset_ready(
@@ -273,7 +282,8 @@ def _provision_bridge_assets(
 
     logger.log(
         f"[bridge] asset plan complete: model={plan.resolved_model.local_name} "
-        f"encoder_route={plan.encoder_route} downloads={download_counter[0]}"
+        f"encoder_route={plan.encoder_route} encoder_layout={plan.text_encoder_layout.layout_id} "
+        f"downloads={download_counter[0]}"
     )
     return plan
 
@@ -605,10 +615,16 @@ def main():
             return
 
         use_int8_encoder = provision_plan.encoder_route == "int8"
-        _log(f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} encoder_route={provision_plan.encoder_route}")
+        _log(
+            f"[bridge] tier decision: vram={total_vram_gb:.2f}GB device={device} "
+            f"encoder_route={provision_plan.encoder_route} "
+            f"encoder_layout={provision_plan.text_encoder_layout.layout_id}"
+        )
 
         if use_int8_encoder:
             _log("[bridge] local INT8 text encoder selected (tier: vram<6G).")
+        elif provision_plan.text_encoder_layout.layout_id == "legacy_base_peft":
+            _log("[bridge] local legacy Meta-Llama-3-8B + LLM2Vec PEFT layout selected (compatibility hit).")
         else:
             _log("[bridge] local LLM2Vec text encoder selected (tier: vram>=6G).")
 
