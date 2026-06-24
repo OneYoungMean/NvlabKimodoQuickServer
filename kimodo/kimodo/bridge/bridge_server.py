@@ -341,7 +341,7 @@ def _resolve_skeleton_for_joint_count(skeleton, num_joints: int):
     return skeleton
 
 
-def _extract_flat_local_rot_quats(model, output, sample_index: int):
+def _extract_local_rot_mats(model, output, sample_index: int):
     local_rot = None
 
     if output.get("local_rot_mats") is not None:
@@ -366,6 +366,11 @@ def _extract_flat_local_rot_quats(model, output, sample_index: int):
         except Exception as exc:
             _out({"status": "progress", "message": f"rotation fallback failed: {exc}"})
 
+    return local_rot
+
+
+def _extract_flat_local_rot_quats(model, output, sample_index: int):
+    local_rot = _extract_local_rot_mats(model, output, sample_index)
     if local_rot is None:
         return None
 
@@ -474,6 +479,53 @@ class UnityMotionJsonResult:
         return json.dumps(payload, separators=(",", ":"))
 
 
+def _resolve_bridge_output_format() -> str:
+    raw = os.environ.get("KIMODO_BRIDGE_OUTPUT_FORMAT", "json_compact").strip().lower()
+    return raw if raw in ("json_compact", "bvh") else "json_compact"
+
+
+def _resolve_bridge_bvh_standard_tpose() -> bool:
+    return _env_flag("KIMODO_BRIDGE_BVH_STANDARD_TPOSE", False)
+
+
+def _build_generate_response(model: Any, output: dict, prompt: str, sample_index: int = 0) -> dict:
+    output_format = _resolve_bridge_output_format()
+    motion_data = UnityMotionJsonResult.from_model_output(model, output, prompt, sample_index=sample_index)
+    if output_format != "bvh":
+        return {
+            "status": "done",
+            "output_format": "json_compact",
+            "motion_json_compact": motion_data.to_compact_json(),
+        }
+
+    from kimodo.exports.bvh import motion_to_bvh
+
+    sample_joints = np.asarray(output["posed_joints"][sample_index], dtype=np.float32)
+    num_joints = int(sample_joints.shape[1])
+    skeleton = _resolve_skeleton_for_joint_count(getattr(model, "skeleton", None), num_joints)
+    if skeleton is None:
+        raise ValueError(f"Cannot resolve skeleton for BVH export with joint_count={num_joints}.")
+
+    local_rot_mats = _extract_local_rot_mats(model, output, sample_index)
+    if local_rot_mats is None:
+        raise ValueError("BVH export requires local rotations, but none were available in model output.")
+
+    root_idx = int(getattr(skeleton, "root_idx", 0))
+    root_positions = sample_joints[:, root_idx, :]
+    bvh_text = motion_to_bvh(
+        local_rot_mats,
+        root_positions,
+        skeleton=skeleton,
+        fps=float(model.fps),
+        standard_tpose=_resolve_bridge_bvh_standard_tpose(),
+    )
+    return {
+        "status": "done",
+        "output_format": "bvh",
+        "motion_bvh": bvh_text,
+    }
+
+
 def _generate(req: dict, model):
     from kimodo.tools import seed_everything
 
@@ -505,8 +557,7 @@ def _generate(req: dict, model):
         return_numpy=True,
     )
 
-    motion_data = UnityMotionJsonResult.from_model_output(model, output, prompt, sample_index=0)
-    _out({"status": "done", "motion_json_compact": motion_data.to_compact_json()})
+    _out(_build_generate_response(model, output, prompt, sample_index=0))
 
 
 def main():
@@ -798,8 +849,7 @@ def main():
                                 return_numpy=True,
                             )
 
-                            motion_data = UnityMotionJsonResult.from_model_output(model, output, prompt, sample_index=0)
-                            resp = {"status": "done", "motion_json_compact": motion_data.to_compact_json()}
+                            resp = _build_generate_response(model, output, prompt, sample_index=0)
                         elif cmd == "quit":
                             resp = {"status": "bye"}
                             _set_quitting()

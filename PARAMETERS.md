@@ -22,6 +22,8 @@
 关键运行变量：
 - `KIMODO_MODELS_ROOT`: 默认 models 根目录（可被 `--models-root` 覆盖）。
 - `KIMODO_IDLE_TIMEOUT_SEC`: 服务空闲退出秒数（当前设定 `600`）。
+- `KIMODO_BRIDGE_OUTPUT_FORMAT=json_compact|bvh`: bridge TCP `generate` 返回格式。默认 `json_compact`；设为 `bvh` 时，仅返回 `motion_bvh`，不再返回 `motion_json_compact`。
+- `KIMODO_BRIDGE_BVH_STANDARD_TPOSE=0|1`: 仅在 `KIMODO_BRIDGE_OUTPUT_FORMAT=bvh` 时生效。设为 `1` 时，BVH 以标准 T-pose 作为 rest pose 导出。
 - 下载站点默认是自动探测 HF / ModelScope 后择优；`--force-hf-download` 会跳过探测并强制走 HF。
 
 INT8 资产说明：
@@ -47,6 +49,7 @@ INT8 资产说明：
 - 默认启动等待窗口约 `180s`（`1s * 180`）。
 - 不做 `serverport` 回填、不做 TCP 探活；`serverport` 仅由 bridge server 写入。
 - `run_server.bat setup` / `run_server.sh setup` 都是同一条 Python 入口的子命令，用于单独执行 setup。
+- `KIMODO_BRIDGE_OUTPUT_FORMAT=bvh` 是给直接消费 QuickServer TCP 返回值的外部客户端使用的。现有 Unity 客户端仍然依赖 `motion_json_compact`，不应在 Unity 这条链路上开启。
 
 已移除变量：
 - `CHECKPOINT_DIR`: 改用 `KIMODO_MODELS_ROOT`。
