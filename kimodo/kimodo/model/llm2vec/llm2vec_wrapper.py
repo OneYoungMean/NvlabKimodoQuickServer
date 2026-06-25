@@ -167,6 +167,9 @@ class LLM2VecEncoder(nn.Module):
                 torch_dtype=self.torch_dtype,
                 device_map="cpu"
             )
+            self.model.eval()
+            for param in self.model.parameters():
+                param.requires_grad = False
 
         if self.target_device.startswith("cuda"):
             from kimodo.demo.memory_manager import manager
@@ -224,7 +227,13 @@ class LLM2VecEncoder(nn.Module):
         results = []
         for t in text:
             with torch.no_grad():
-                emb = self.model.encode([t])
+                emb = self.model.encode(
+                    [t],
+                    # Keep single-text batches deterministic and avoid progress noise.
+                    batch_size=1,
+                    show_progress_bar=False,
+                    device=self.target_device,
+                )
                 results.append(emb)
 
         encoded_text = np.concatenate(results, axis=0)
