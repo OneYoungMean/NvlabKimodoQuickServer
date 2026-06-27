@@ -441,6 +441,31 @@ def _ensure_bitsandbytes(paths: ProjectPaths, uv_bin: str, logger: SetupLogger) 
         raise SetupError("bitsandbytes version check failed after install.")
 
 
+def _uninstall_bitsandbytes(paths: ProjectPaths, uv_bin: str, logger: SetupLogger) -> None:
+    logger.log("[STEP] Removing bitsandbytes from runtime environment...")
+    _run_logged(
+        [uv_bin, "pip", "uninstall", "--python", str(paths.venv_python), "bitsandbytes"],
+        logger,
+        check=False,
+    )
+
+
+def _validate_bitsandbytes_runtime(paths: ProjectPaths, logger: SetupLogger) -> bool:
+    logger.log("[STEP] Validating bitsandbytes runtime...")
+    script = (
+        "import sys; "
+        "import bitsandbytes as bnb; "
+        "from bitsandbytes.nn import Linear4bit; "
+        "print('bnb=' + str(getattr(bnb,'__version__','unknown'))); "
+        "print('linear4bit=' + Linear4bit.__name__); "
+        "sys.exit(0)"
+    )
+    rc, output = _run_capture([str(paths.venv_python), "-c", script])
+    for line in output.splitlines():
+        logger.log(line)
+    return rc == 0
+
+
 def _ensure_motion_correction(paths: ProjectPaths, uv_bin: str, logger: SetupLogger, default_index: str) -> None:
     logger.log("[STEP] Ensuring motion_correction...")
     rc, _ = _run_capture([str(paths.venv_python), "-c", "import motion_correction"])
@@ -646,6 +671,12 @@ def _setup_buildenv(paths: ProjectPaths, setup_mode: str, logger: SetupLogger) -
         if validate_rc != 0:
             raise SetupError("CUDA torch runtime validation failed.")
         _ensure_bitsandbytes(paths, uv_bin, logger)
+        if not _validate_bitsandbytes_runtime(paths, logger):
+            logger.log("[WARN] bitsandbytes validation failed on the current runtime.")
+            _uninstall_bitsandbytes(paths, uv_bin, logger)
+            logger.log("[WARN] Falling back to torchruntime to pick an architecture-matched build...")
+            _install_torch_via_torchruntime(paths, uv_bin, default_index, logger)
+            logger.log("[INFO] torchruntime fallback active; continuing without bitsandbytes.")
 
     _ensure_motion_correction(paths, uv_bin, logger, default_index)
     paths.models_dir.mkdir(parents=True, exist_ok=True)
