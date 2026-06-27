@@ -7,6 +7,7 @@ if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%"
 set "UV_CACHE_DIR=%ROOT_DIR%\program\exe\uv"
 set "UV_BIN="
+set "UV_INSTALL_TIMEOUT_SEC=600"
 if defined KIMODO_TEST_VENV_PATH (
   echo [ERROR] KIMODO_TEST_VENV_PATH has been removed. Use KIMODO_VENV_PATH.
   exit /b 1
@@ -102,6 +103,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $installDir = '%UV_CACHE_DIR%'
+$timeoutSec = %UV_INSTALL_TIMEOUT_SEC%
 
 $candidates = @(
   @{
@@ -178,10 +180,33 @@ if (-not [string]::IsNullOrWhiteSpace($selected.GithubBaseUrl)) {
   $env:UV_INSTALLER_GITHUB_BASE_URL = $selected.GithubBaseUrl
 }
 
-Invoke-RestMethod -Uri $selected.ScriptUrl | Invoke-Expression
+$job = Start-Job -ArgumentList $selected.ScriptUrl -ScriptBlock {
+  param($scriptUrl)
+  $ErrorActionPreference = "Stop"
+  $ProgressPreference = "SilentlyContinue"
+  Invoke-RestMethod -Uri $scriptUrl | Invoke-Expression
+}
+
+if (-not (Wait-Job -Job $job -Timeout $timeoutSec)) {
+  Stop-Job -Job $job -Force -ErrorAction SilentlyContinue | Out-Null
+  Remove-Job -Job $job -Force -ErrorAction SilentlyContinue | Out-Null
+  throw ("uv automatic installation timed out after {0} seconds." -f $timeoutSec)
+}
+
+$output = Receive-Job -Job $job -Keep
+$jobState = $job.State
+Remove-Job -Job $job -Force -ErrorAction SilentlyContinue | Out-Null
+if ($jobState -ne "Completed") {
+  throw ("uv automatic installation failed with job state: {0}" -f $jobState)
+}
+
+if ($output) {
+  $output | ForEach-Object { Write-Host $_ }
+}
 '@ | powershell -NoProfile -ExecutionPolicy Bypass -Command - 
 if errorlevel 1 (
-  echo [ERROR] Failed to download uv automatically.
+  echo [ERROR] Failed to download uv automatically within 10 minutes.
+  echo [ERROR] Please install uv manually, or place uv under: %UV_CACHE_DIR%
   exit /b 1
 )
 exit /b 0

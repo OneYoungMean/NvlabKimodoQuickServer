@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 ROOT_DIR="${SCRIPT_DIR}"
+UV_INSTALL_TIMEOUT_SEC=600
 
 resolve_uv_bin() {
   if [[ -n "${KIMODO_UV_BIN:-}" ]]; then
@@ -34,22 +35,55 @@ install_uv_locally() {
   echo "[INFO] Selected uv source: ${selected_name}"
   if command -v curl >/dev/null 2>&1; then
     if [[ -n "${selected_github_base}" ]]; then
-      curl -LsSf "${selected_script}" | env UV_INSTALL_DIR="${uv_dir}" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 UV_INSTALLER_GITHUB_BASE_URL="${selected_github_base}" sh
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "curl -LsSf \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 UV_INSTALLER_GITHUB_BASE_URL=\"${selected_github_base}\" sh" || return 1
     else
-      curl -LsSf "${selected_script}" | env UV_INSTALL_DIR="${uv_dir}" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "curl -LsSf \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh" || return 1
     fi
     return
   fi
   if command -v wget >/dev/null 2>&1; then
     if [[ -n "${selected_github_base}" ]]; then
-      wget -qO- "${selected_script}" | env UV_INSTALL_DIR="${uv_dir}" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 UV_INSTALLER_GITHUB_BASE_URL="${selected_github_base}" sh
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "wget -qO- \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 UV_INSTALLER_GITHUB_BASE_URL=\"${selected_github_base}\" sh" || return 1
     else
-      wget -qO- "${selected_script}" | env UV_INSTALL_DIR="${uv_dir}" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "wget -qO- \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh" || return 1
     fi
     return
   fi
   echo "[ERROR] Could not auto-install uv: curl or wget is required."
   return 1
+}
+
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+  "$@" &
+  local cmd_pid=$!
+  (
+    sleep "${timeout_sec}"
+    kill -TERM "${cmd_pid}" >/dev/null 2>&1 || true
+    sleep 2
+    kill -KILL "${cmd_pid}" >/dev/null 2>&1 || true
+  ) &
+  local watchdog_pid=$!
+  local rc=0
+  if wait "${cmd_pid}"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  kill -TERM "${watchdog_pid}" >/dev/null 2>&1 || true
+  wait "${watchdog_pid}" 2>/dev/null || true
+  if [[ "${rc}" -eq 143 || "${rc}" -eq 137 ]]; then
+    echo "[ERROR] uv automatic installation timed out after ${timeout_sec} seconds."
+    echo "[ERROR] Please install uv manually, or place uv under: ${ROOT_DIR}/program/exe/uv"
+    return 1
+  fi
+  if [[ "${rc}" -ne 0 ]]; then
+    echo "[ERROR] uv automatic installation failed."
+    echo "[ERROR] Please install uv manually, or place uv under: ${ROOT_DIR}/program/exe/uv"
+    return "${rc}"
+  fi
+  return 0
 }
 
 probe_uv_candidate() {
