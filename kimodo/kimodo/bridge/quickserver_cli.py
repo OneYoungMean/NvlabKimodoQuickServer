@@ -18,6 +18,7 @@ from .quickserver_setup import ProjectPaths, SetupLogger, archive_path, discover
 BRIDGE_LOG_NAME = "bridge_server.log"
 WATCHDOG_LOG_NAME = "watchdog.log"
 ALLOW_MULTI_SERVER_ENV_KEYS = ("KIMODO_ALLOW_MULTI_SERVER", "ALLOWMULTISERVER", "allowmultiserver")
+RUN_LOCK_HELD_ENV = "KIMODO_RUN_LOCK_HELD"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -263,6 +264,7 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
     bridge_pid_file = paths.root_dir / ".bridge.pid"
     port_file = paths.root_dir / "serverport"
     allow_multi_server = _allow_multi_server()
+    run_lock_held_from_outer = os.environ.get(RUN_LOCK_HELD_ENV, "").strip() == "1"
     resolved_model = assets.resolve_main_model(args.model)
     models_root, _using_external_models = assets.resolve_models_root(paths.root_dir, args.models_root)
     runtime_hints = assets.normalize_runtime_hints(args.device)
@@ -270,7 +272,7 @@ def _launch_bridge(paths: ProjectPaths, args: argparse.Namespace, logger: SetupL
     encoder_layout = assets.select_text_encoder_layout_for_route(encoder_route, models_root)
     signature = _server_signature(resolved_model, models_root, runtime_hints, bool(args.highvram))
 
-    if not allow_multi_server:
+    if not allow_multi_server and not run_lock_held_from_outer:
         existing_port = _try_read_port_file(port_file)
         if existing_port is not None and _probe_server(*existing_port):
             logger.log("[INFO] Existing server already responding. Reusing shared instance.")
@@ -440,7 +442,8 @@ def _run_watchdog(
             return 0 if started_ok else 1
 
         if not started_ok:
-            if port_file.exists():
+            port_info = _try_read_port_file(port_file)
+            if port_info is not None and _probe_server(*port_info):
                 started_ok = True
                 if on_started is not None:
                     try:
@@ -452,10 +455,10 @@ def _run_watchdog(
                 continue
             startup_fails += 1
             if startup_fails >= startup_max_fails:
-                _write_watchdog(f"[ERROR] serverport not found within {startup_max_fails} checks. Killing pid={bridge_pid}")
+                _write_watchdog(f"[ERROR] server not ready within {startup_max_fails} checks. Killing pid={bridge_pid}")
                 _kill_bridge()
                 return 1
-            _write_watchdog(f"[INFO] Waiting serverport ({startup_fails}/{startup_max_fails})")
+            _write_watchdog(f"[INFO] Waiting server readiness ({startup_fails}/{startup_max_fails})")
             time.sleep(startup_interval)
             continue
 
