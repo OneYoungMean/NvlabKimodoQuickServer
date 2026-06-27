@@ -24,6 +24,7 @@ class ProjectPaths:
     models_dir: Path
     setup_sentinel: Path
     setup_lock: Path
+    run_lock: Path
     run_marker: Path
 
     @property
@@ -106,6 +107,7 @@ def discover_project_paths(root_dir: str | os.PathLike[str] | None = None) -> Pr
         models_dir=root_path / "models",
         setup_sentinel=root_path / ".setup.complete",
         setup_lock=root_path / ".setup.lock",
+        run_lock=root_path / ".run.lock",
         run_marker=root_path / "run",
     )
 
