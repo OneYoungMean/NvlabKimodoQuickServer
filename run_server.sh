@@ -35,17 +35,17 @@ install_uv_locally() {
   echo "[INFO] Selected uv source: ${selected_name}"
   if command -v curl >/dev/null 2>&1; then
     if [[ -n "${selected_github_base}" ]]; then
-      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "curl -LsSf \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 UV_INSTALLER_GITHUB_BASE_URL=\"${selected_github_base}\" sh" || return 1
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "curl -LsSf \"${selected_script}\" | env UV_UNMANAGED_INSTALL=\"${uv_dir}\" UV_INSTALLER_GITHUB_BASE_URL=\"${selected_github_base}\" sh" || return 1
     else
-      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "curl -LsSf \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh" || return 1
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "curl -LsSf \"${selected_script}\" | env UV_UNMANAGED_INSTALL=\"${uv_dir}\" sh" || return 1
     fi
     return
   fi
   if command -v wget >/dev/null 2>&1; then
     if [[ -n "${selected_github_base}" ]]; then
-      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "wget -qO- \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 UV_INSTALLER_GITHUB_BASE_URL=\"${selected_github_base}\" sh" || return 1
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "wget -qO- \"${selected_script}\" | env UV_UNMANAGED_INSTALL=\"${uv_dir}\" UV_INSTALLER_GITHUB_BASE_URL=\"${selected_github_base}\" sh" || return 1
     else
-      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "wget -qO- \"${selected_script}\" | env UV_INSTALL_DIR=\"${uv_dir}\" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh" || return 1
+      run_with_timeout "${UV_INSTALL_TIMEOUT_SEC}" sh -c "wget -qO- \"${selected_script}\" | env UV_UNMANAGED_INSTALL=\"${uv_dir}\" sh" || return 1
     fi
     return
   fi

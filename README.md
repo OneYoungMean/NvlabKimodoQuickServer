@@ -12,7 +12,7 @@
 ## Requirements
 - Windows 10/11 x64
 - Model root available (recommended): `C:\nvlab\models~`
-- `uv` is required. `run_server.bat` / `run_server.sh` can download it into `program\exe\uv\` on first launch if missing.
+- `uv` is required. `run_server.bat` / `run_server.sh` can download an unmanaged local `uv` binary into `program\exe\uv\` on first launch if missing. Its package cache still uses uv's normal global cache location.
 
 ## Install
 ```bat
