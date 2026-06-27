@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from kimodo.bridge import quickserver_assets as assets
 
@@ -627,12 +628,16 @@ def _write_flatbuffer_generate_response(file, payload: bytes) -> None:
 
 def _make_cancelable_progress_bar(cancel_event: threading.Event):
     def _progress_bar(iterable):
-        for item in iterable:
+        progress = tqdm(iterable, ascii=" =O")
+        try:
+            for item in progress:
+                if cancel_event.is_set():
+                    raise GenerateCancelledError("Generation canceled.")
+                yield item
             if cancel_event.is_set():
                 raise GenerateCancelledError("Generation canceled.")
-            yield item
-        if cancel_event.is_set():
-            raise GenerateCancelledError("Generation canceled.")
+        finally:
+            progress.close()
 
     return _progress_bar
 
