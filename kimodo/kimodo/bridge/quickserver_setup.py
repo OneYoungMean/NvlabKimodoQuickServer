@@ -226,7 +226,7 @@ def _find_uv_bin(paths: ProjectPaths) -> str:
             continue
         if completed.returncode == 0:
             return candidate_path
-    raise SetupError("uv not found. Place the bundled uv binary under program/exe/uv or install uv on PATH.")
+    raise SetupError("uv not found. Set KIMODO_UV_BIN, place a local uv binary under program/exe/uv, or install uv on PATH.")
 
 
 def _select_uv_default_index() -> str:

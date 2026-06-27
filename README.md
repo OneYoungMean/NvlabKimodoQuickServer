@@ -11,9 +11,8 @@
 
 ## Requirements
 - Windows 10/11 x64
-- Local tools under `program\exe\`:
-  - `uv\uv.exe`
 - Model root available (recommended): `C:\nvlab\models~`
+- `uv` is required. `run_server.bat` / `run_server.sh` can download it into `program\exe\uv\` on first launch if missing.
 
 ## Install
 ```bat

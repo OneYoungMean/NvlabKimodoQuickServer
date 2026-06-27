@@ -5,7 +5,8 @@ chcp 65001 >nul
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "ROOT_DIR=%SCRIPT_DIR%"
-set "UV_BIN=%ROOT_DIR%\program\exe\uv\uv.exe"
+set "UV_CACHE_DIR=%ROOT_DIR%\program\exe\uv"
+set "UV_BIN="
 if defined KIMODO_TEST_VENV_PATH (
   echo [ERROR] KIMODO_TEST_VENV_PATH has been removed. Use KIMODO_VENV_PATH.
   exit /b 1
@@ -24,8 +25,13 @@ if defined CHECKPOINT_DIR (
 )
 set "VENV_OVERRIDE=%KIMODO_VENV_PATH%"
 
-if not exist "%UV_BIN%" (
-  echo [ERROR] Missing bundled uv: %UV_BIN%
+call :resolve_uv_bin
+if not defined UV_BIN (
+  call :prompt_install_uv || exit /b 1
+  call :resolve_uv_bin
+)
+if not defined UV_BIN (
+  echo [ERROR] uv is still unavailable after the download attempt.
   exit /b 1
 )
 
@@ -51,6 +57,131 @@ if defined VENV_OVERRIDE if not defined HAS_VENV_ARG (
     set "ARGS="--venv" "%VENV_OVERRIDE%""
   )
 )
-set "CMD=%UV_BIN% run --python 3.12 --no-project python quickserver.py !ARGS!"
-call %CMD%
+"%UV_BIN%" run --python 3.12 --no-project python "%ROOT_DIR%\quickserver.py" !ARGS!
 exit /b %ERRORLEVEL%
+
+:resolve_uv_bin
+set "UV_BIN="
+if defined KIMODO_UV_BIN (
+  call :check_uv_candidate "%KIMODO_UV_BIN%"
+  if defined UV_BIN goto :eof
+)
+call :check_uv_candidate "%UV_CACHE_DIR%\uv.exe"
+if defined UV_BIN goto :eof
+for /f "delims=" %%I in ('where uv.exe 2^>nul') do (
+  call :check_uv_candidate "%%~fI"
+  if defined UV_BIN goto :eof
+)
+goto :eof
+
+:check_uv_candidate
+set "UV_CANDIDATE=%~1"
+if not defined UV_CANDIDATE goto :eof
+if not exist "%UV_CANDIDATE%" goto :eof
+"%UV_CANDIDATE%" --version >nul 2>nul
+if errorlevel 1 goto :eof
+set "UV_BIN=%UV_CANDIDATE%"
+goto :eof
+
+:prompt_install_uv
+set "UV_ANSWER="
+echo [ERROR] uv is required but was not found.
+echo         QuickServer can download it into: %UV_CACHE_DIR%
+set /p UV_ANSWER=Would you like QuickServer to download uv now? [Y/N] 
+if /I "%UV_ANSWER%"=="Y" goto install_uv
+if /I "%UV_ANSWER%"=="YES" goto install_uv
+if /I "%UV_ANSWER%"=="N" exit /b 1
+if /I "%UV_ANSWER%"=="NO" exit /b 1
+exit /b 1
+
+:install_uv
+if not exist "%UV_CACHE_DIR%" mkdir "%UV_CACHE_DIR%" >nul 2>nul
+echo [INFO] Probing uv download sources for this launch...
+@'
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+$installDir = '%UV_CACHE_DIR%'
+
+$candidates = @(
+  @{
+    Name = "official"
+    ScriptUrl = "https://astral.sh/uv/install.ps1"
+    GithubBaseUrl = $null
+  },
+  @{
+    Name = "release-mirror"
+    ScriptUrl = "https://releases.astral.sh/github/uv/releases/latest/download/uv-installer.ps1"
+    GithubBaseUrl = "https://releases.astral.sh/github"
+  }
+)
+
+function Probe-Url {
+  param([string]$Url)
+  $watch = [System.Diagnostics.Stopwatch]::StartNew()
+  try {
+    $response = Invoke-WebRequest -Method Head -UseBasicParsing -Uri $Url -TimeoutSec 3
+    $watch.Stop()
+    return @{
+      Ok = $true
+      Ms = [int]$watch.ElapsedMilliseconds
+      Status = [int]$response.StatusCode
+      Error = ""
+    }
+  } catch {
+    $watch.Stop()
+    try {
+      $statusCode = [int]$_.Exception.Response.StatusCode.value__
+    } catch {
+      $statusCode = 0
+    }
+    return @{
+      Ok = $false
+      Ms = [int]$watch.ElapsedMilliseconds
+      Status = $statusCode
+      Error = $_.Exception.Message
+    }
+  }
+}
+
+$probed = foreach ($candidate in $candidates) {
+  $result = Probe-Url -Url $candidate.ScriptUrl
+  [pscustomobject]@{
+    Name = $candidate.Name
+    ScriptUrl = $candidate.ScriptUrl
+    GithubBaseUrl = $candidate.GithubBaseUrl
+    Ok = $result.Ok
+    Ms = $result.Ms
+    Status = $result.Status
+    Error = $result.Error
+  }
+}
+
+foreach ($entry in $probed) {
+  if ($entry.Ok) {
+    Write-Host ("[PROBE] uv {0}: ok, {1} ms, {2}" -f $entry.Name, $entry.Ms, $entry.ScriptUrl)
+  } else {
+    Write-Host ("[PROBE] uv {0}: failed, {1} ms, status={2}, {3}" -f $entry.Name, $entry.Ms, $entry.Status, $entry.Error)
+  }
+}
+
+$selected = $probed | Where-Object { $_.Ok } | Sort-Object Ms | Select-Object -First 1
+if ($null -eq $selected) {
+  throw "Unable to reach any uv installer source for this launch."
+}
+
+Write-Host ("[INFO] Selected uv source: {0}" -f $selected.Name)
+$env:UV_INSTALL_DIR = $installDir
+$env:UV_NO_MODIFY_PATH = "1"
+$env:INSTALLER_NO_MODIFY_PATH = "1"
+if (-not [string]::IsNullOrWhiteSpace($selected.GithubBaseUrl)) {
+  $env:UV_INSTALLER_GITHUB_BASE_URL = $selected.GithubBaseUrl
+}
+
+Invoke-RestMethod -Uri $selected.ScriptUrl | Invoke-Expression
+'@ | powershell -NoProfile -ExecutionPolicy Bypass -Command - 
+if errorlevel 1 (
+  echo [ERROR] Failed to download uv automatically.
+  exit /b 1
+)
+exit /b 0
