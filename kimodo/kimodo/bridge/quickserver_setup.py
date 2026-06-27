@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 import urllib.request
 
@@ -114,8 +115,12 @@ def setup_mode_from_env(requested_mode: str | None) -> str:
     legacy_value = os.environ.get("KIMODO_TEST_SETUP_DEVICE", "").strip()
     if legacy_value:
         raise SetupError("KIMODO_TEST_SETUP_DEVICE has been removed. Use KIMODO_SETUP_DEVICE.")
-    value = requested_mode or os.environ.get("KIMODO_SETUP_DEVICE") or "auto"
-    return "cpu" if str(value).strip().lower() == "cpu" else "auto"
+    value = str(requested_mode or os.environ.get("KIMODO_SETUP_DEVICE") or "auto").strip().lower()
+    if sys.platform == "darwin":
+        if value.startswith("cuda"):
+            raise SetupError("macOS does not support CUDA setup mode. Use auto, cpu, or mps.")
+        return "cpu"
+    return "cpu" if value == "cpu" else "auto"
 
 
 def resolve_venv_python_arg(venv_arg: str, root_dir: str | os.PathLike[str] | None = None) -> str:
@@ -359,8 +364,10 @@ def _install_cuda_torch(paths: ProjectPaths, uv_bin: str, default_index: str, lo
 
 
 def _validate_torch_env(paths: ProjectPaths, logger: SetupLogger, mode: str) -> int:
-    mode = "cpu" if mode == "cpu" else "cuda"
-    logger.log(f"[STEP] Validating {mode.upper()} torch runtime...")
+    mode_key = str(mode or "cpu").strip().lower()
+    if mode_key not in {"cpu", "cuda", "mps"}:
+        mode_key = "cpu"
+    logger.log(f"[STEP] Validating {mode_key.upper()} torch runtime...")
     import_script = "import importlib,torch,sys; importlib.import_module('torch._jit_internal'); print('torch='+torch.__version__); print('cuda='+str(torch.version.cuda)); sys.exit(0)"
     rc, output = _run_capture([str(paths.venv_python), "-c", import_script])
     for line in output.splitlines():
@@ -368,7 +375,16 @@ def _validate_torch_env(paths: ProjectPaths, logger: SetupLogger, mode: str) -> 
     if rc != 0:
         raise SetupError("torch cannot be loaded in this environment.")
 
-    if mode == "cpu":
+    if mode_key == "cpu":
+        return 0
+
+    if mode_key == "mps":
+        mps_check = "import torch,sys; sys.exit(0 if torch.backends.mps.is_available() else 1)"
+        rc, _output = _run_capture([str(paths.venv_python), "-c", mps_check])
+        if rc != 0:
+            logger.log("[WARN] MPS not available on this machine; torch will run on CPU.")
+            return 0
+        logger.log("[OK] MPS torch runtime validated.")
         return 0
 
     cuda_check = "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"
@@ -425,11 +441,26 @@ def _ensure_bitsandbytes(paths: ProjectPaths, uv_bin: str, logger: SetupLogger) 
         raise SetupError("bitsandbytes version check failed after install.")
 
 
-def _ensure_motion_correction(paths: ProjectPaths, uv_bin: str, logger: SetupLogger) -> None:
+def _ensure_motion_correction(paths: ProjectPaths, uv_bin: str, logger: SetupLogger, default_index: str) -> None:
     logger.log("[STEP] Ensuring motion_correction...")
     rc, _ = _run_capture([str(paths.venv_python), "-c", "import motion_correction"])
     if rc == 0:
         logger.log("[INFO] motion_correction already present, skip reinstall.")
+        return
+
+    if sys.platform == "darwin":
+        motion_correction_root = paths.source_root / "MotionCorrection"
+        if not motion_correction_root.exists():
+            raise SetupError(f"Missing MotionCorrection source tree: {motion_correction_root}")
+        logger.log("[STEP] macOS detected: installing cmake helper and building motion_correction from source...")
+        _run_logged(
+            [uv_bin, "pip", "install", "--python", str(paths.venv_python), "--default-index", default_index, "cmake"],
+            logger,
+        )
+        _run_logged(
+            [uv_bin, "pip", "install", "--python", str(paths.venv_python), "--default-index", default_index, str(motion_correction_root)],
+            logger,
+        )
         return
 
     if os.name == "nt":
@@ -544,31 +575,56 @@ def _setup_buildenv(paths: ProjectPaths, setup_mode: str, logger: SetupLogger) -
         logger.log("[INFO] kimodo already usable, skip reinstall.")
 
     if setup_mode == "cpu":
-        logger.log("[STEP] Installing CPU torch runtime via uv...")
-        _run_logged(
-            [
-                uv_bin,
-                "pip",
-                "install",
-                "--python",
-                str(paths.venv_python),
-                "--default-index",
-                default_index,
-                "--torch-backend",
-                "cpu",
-                "--reinstall-package",
-                "torch",
-                "--reinstall-package",
-                "torchvision",
-                "--reinstall-package",
-                "torchaudio",
-                "torch",
-                "torchvision",
-                "torchaudio",
-            ],
-            logger,
-        )
-        _validate_torch_env(paths, logger, "cpu")
+        if sys.platform == "darwin":
+            logger.log("[STEP] Installing macOS torch runtime via uv...")
+            _run_logged(
+                [
+                    uv_bin,
+                    "pip",
+                    "install",
+                    "--python",
+                    str(paths.venv_python),
+                    "--default-index",
+                    default_index,
+                    "--reinstall-package",
+                    "torch",
+                    "--reinstall-package",
+                    "torchvision",
+                    "--reinstall-package",
+                    "torchaudio",
+                    "torch",
+                    "torchvision",
+                    "torchaudio",
+                ],
+                logger,
+            )
+            _validate_torch_env(paths, logger, "mps")
+        else:
+            logger.log("[STEP] Installing CPU torch runtime via uv...")
+            _run_logged(
+                [
+                    uv_bin,
+                    "pip",
+                    "install",
+                    "--python",
+                    str(paths.venv_python),
+                    "--default-index",
+                    default_index,
+                    "--torch-backend",
+                    "cpu",
+                    "--reinstall-package",
+                    "torch",
+                    "--reinstall-package",
+                    "torchvision",
+                    "--reinstall-package",
+                    "torchaudio",
+                    "torch",
+                    "torchvision",
+                    "torchaudio",
+                ],
+                logger,
+            )
+            _validate_torch_env(paths, logger, "cpu")
         logger.log("[INFO] CPU mode: skip bitsandbytes/4-bit install by policy.")
     else:
         rc, _ = _run_capture([str(paths.venv_python), "-c", "import torch,sys; sys.exit(0 if torch.version.cuda is not None else 1)"])
@@ -591,7 +647,7 @@ def _setup_buildenv(paths: ProjectPaths, setup_mode: str, logger: SetupLogger) -
             raise SetupError("CUDA torch runtime validation failed.")
         _ensure_bitsandbytes(paths, uv_bin, logger)
 
-    _ensure_motion_correction(paths, uv_bin, logger)
+    _ensure_motion_correction(paths, uv_bin, logger, default_index)
     paths.models_dir.mkdir(parents=True, exist_ok=True)
     _runtime_import_check(paths)
     paths.run_marker.mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 ROOT_DIR="${SCRIPT_DIR}"
-UV_BIN="${ROOT_DIR}/program/exe/uv/uv.exe"
+
+if [[ -n "${KIMODO_UV_BIN:-}" ]]; then
+  UV_BIN="${KIMODO_UV_BIN}"
+elif [[ -x "${ROOT_DIR}/program/exe/uv/uv" ]]; then
+  UV_BIN="${ROOT_DIR}/program/exe/uv/uv"
+elif [[ -x "${ROOT_DIR}/program/exe/uv/uv.exe" ]]; then
+  UV_BIN="${ROOT_DIR}/program/exe/uv/uv.exe"
+elif command -v uv >/dev/null 2>&1; then
+  UV_BIN="$(command -v uv)"
+else
+  UV_BIN=""
+fi
 
 if [[ -n "${KIMODO_TEST_VENV_PATH:-}" ]]; then
   echo "[ERROR] KIMODO_TEST_VENV_PATH has been removed. Use KIMODO_VENV_PATH."
@@ -22,7 +33,7 @@ if [[ -n "${CHECKPOINT_DIR:-}" ]]; then
   exit 1
 fi
 
-if [[ ! -x "${UV_BIN}" ]]; then
+if [[ -z "${UV_BIN}" || ! -x "${UV_BIN}" ]]; then
   echo "[ERROR] Missing bundled uv: ${UV_BIN}"
   exit 1
 fi

@@ -44,6 +44,15 @@ def _detect_total_vram_gb() -> float:
     return 0.0
 
 
+def _detect_mps_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.backends.mps.is_available())
+    except Exception:
+        return False
+
+
 def _write_text_atomic(path: str, content: str) -> None:
     dir_path = os.path.dirname(path)
     if dir_path:
@@ -720,18 +729,24 @@ def main():
 
         # Determine kimodo device.
         if args.device:
-            device = args.device
+            device = str(args.device).strip()
             # Soft CUDA fallback: honor explicit --device only when GPU exists.
             if str(device).lower().startswith("cuda") and not torch.cuda.is_available():
                 _log(f"[bridge] requested device '{device}' but CUDA is unavailable; falling back to CPU.")
                 _out({"status": "loading", "message": f"CUDA unavailable; running on CPU instead of {device}."})
                 device = "cpu"
+            elif str(device).lower().startswith("mps") and not _detect_mps_available():
+                _log(f"[bridge] requested device '{device}' but MPS is unavailable; falling back to CPU.")
+                _out({"status": "loading", "message": f"MPS unavailable; running on CPU instead of {device}."})
+                device = "cpu"
         else:
             # Auto-decide based on tier.
-            if total_vram_gb < 2.0 or not torch.cuda.is_available():
-                device = "cpu"
-            else:
+            if torch.cuda.is_available() and total_vram_gb >= 2.0:
                 device = "cuda:0"
+            elif _detect_mps_available():
+                device = "mps"
+            else:
+                device = "cpu"
 
         _set_loading_message("Checking local models...")
         _out({"status": "loading", "message": "Checking local models..."})
