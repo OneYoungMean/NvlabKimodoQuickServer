@@ -25,6 +25,10 @@ import numpy as np
 from kimodo.bridge import quickserver_assets as assets
 
 
+class GenerateCancelledError(Exception):
+    pass
+
+
 def _default_bridge_log_path(root: str) -> str:
     if not root:
         return ""
@@ -621,7 +625,19 @@ def _write_flatbuffer_generate_response(file, payload: bytes) -> None:
     file.flush()
 
 
-def _generate(req: dict, model):
+def _make_cancelable_progress_bar(cancel_event: threading.Event):
+    def _progress_bar(iterable):
+        for item in iterable:
+            if cancel_event.is_set():
+                raise GenerateCancelledError("Generation canceled.")
+            yield item
+        if cancel_event.is_set():
+            raise GenerateCancelledError("Generation canceled.")
+
+    return _progress_bar
+
+
+def _generate(req: dict, model, cancel_event: threading.Event | None = None):
     from kimodo.tools import seed_everything
 
     prompt = str(req.get("prompt", "A person walks forward.")).strip()
@@ -638,6 +654,7 @@ def _generate(req: dict, model):
 
     num_frames = max(1, int(duration * float(model.fps)))
     constraints = _load_constraints(constraints_path, model)
+    progress_bar = _make_cancelable_progress_bar(cancel_event or threading.Event())
 
     _out({"status": "progress", "message": f"Running diffusion ({diffusion_steps} steps)..."})
     output = model(
@@ -650,7 +667,10 @@ def _generate(req: dict, model):
         num_transition_frames=5,
         post_processing=True,
         return_numpy=True,
+        progress_bar=progress_bar,
     )
+    if cancel_event is not None and cancel_event.is_set():
+        raise GenerateCancelledError("Generation canceled.")
 
     _out(_build_generate_response(model, output, prompt, sample_index=0))
 
@@ -696,6 +716,8 @@ def main():
     last_command_lock = threading.Lock()
     active_command_count = 0
     active_command_lock = threading.Lock()
+    active_generation_cancel_event = None
+    active_generation_lock = threading.Lock()
     quitting = False
     quitting_lock = threading.Lock()
 
@@ -837,6 +859,27 @@ def main():
         with active_command_lock:
             active_command_count = max(0, active_command_count - 1)
 
+    def _try_begin_generate() -> threading.Event | None:
+        nonlocal active_generation_cancel_event
+        with active_generation_lock:
+            if active_generation_cancel_event is not None:
+                return None
+            active_generation_cancel_event = threading.Event()
+            return active_generation_cancel_event
+
+    def _finish_generate(cancel_event: threading.Event) -> None:
+        nonlocal active_generation_cancel_event
+        with active_generation_lock:
+            if active_generation_cancel_event is cancel_event:
+                active_generation_cancel_event = None
+
+    def _request_generate_cancel() -> bool:
+        with active_generation_lock:
+            if active_generation_cancel_event is None:
+                return False
+            active_generation_cancel_event.set()
+            return True
+
     def _idle_watchdog_worker():
         while not _is_quitting():
             time.sleep(1.0)
@@ -859,71 +902,77 @@ def main():
 
     threading.Thread(target=_idle_watchdog_worker, daemon=True).start()
 
-    try:
-        while not _is_quitting():
-            try:
-                conn, _addr = server.accept()
-            except OSError:
-                if _is_quitting():
+    def _client_worker(conn: socket.socket, addr) -> None:
+        with conn:
+            file = conn.makefile("rwb")
+            while not _is_quitting():
+                try:
+                    line = file.readline()
+                except (ConnectionResetError, BrokenPipeError, OSError):
                     break
-                raise
-            _log(f"[bridge] accept {_addr}")
-            with conn:
-                file = conn.makefile("rwb")
-                while not _is_quitting():
-                    try:
-                        line = file.readline()
-                    except (ConnectionResetError, BrokenPipeError, OSError):
-                        break
-                    if not line:
-                        break
+                if not line:
+                    break
 
-                    try:
-                        req = json.loads(line.decode("utf-8").strip())
-                    except Exception as exc:
-                        resp = {"status": "error", "message": f"Bad JSON: {exc}"}
-                        file.write((json.dumps(resp) + "\n").encode("utf-8"))
-                        file.flush()
-                        continue
+                try:
+                    req = json.loads(line.decode("utf-8").strip())
+                except Exception as exc:
+                    resp = {"status": "error", "message": f"Bad JSON: {exc}"}
+                    file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                    file.flush()
+                    continue
 
-                    cmd = req.get("cmd", "")
-                    _touch_last_command()
-                    _log(f"[bridge] cmd={cmd}")
-                    stage = f"cmd:{cmd}" if cmd else "cmd:unknown"
-                    _command_started()
-                    try:
-                        if cmd == "ping":
-                            with state_lock:
-                                if state["loading"]:
-                                    resp = {"status": "loading", "message": "Model is loading."}
-                                elif state["error"]:
-                                    resp = {"status": "error", "message": state["error"]}
-                                else:
-                                    resp = {"status": "pong"}
-                        elif cmd == "generate":
-                            with state_lock:
-                                loading = state["loading"]
-                                load_error = state["error"]
-                                model = state["model"]
-                                fps = state["fps"]
-
-                            if loading:
+                cmd = req.get("cmd", "")
+                _touch_last_command()
+                _log(f"[bridge] cmd={cmd}")
+                stage = f"cmd:{cmd}" if cmd else "cmd:unknown"
+                _command_started()
+                try:
+                    if cmd == "ping":
+                        with state_lock:
+                            if state["loading"]:
                                 resp = {"status": "loading", "message": "Model is loading."}
-                                file.write((json.dumps(resp) + "\n").encode("utf-8"))
-                                file.flush()
-                                continue
-                            if load_error:
-                                resp = {"status": "error", "message": load_error}
-                                file.write((json.dumps(resp) + "\n").encode("utf-8"))
-                                file.flush()
-                                continue
-                            if model is None:
-                                resp = {"status": "error", "message": "Model not available."}
-                                file.write((json.dumps(resp) + "\n").encode("utf-8"))
-                                file.flush()
-                                continue
+                            elif state["error"]:
+                                resp = {"status": "error", "message": state["error"]}
+                            else:
+                                resp = {"status": "pong"}
+                    elif cmd == "cancel":
+                        if _request_generate_cancel():
+                            resp = {"status": "cancelling", "message": "Cancel requested."}
+                        else:
+                            resp = {"status": "idle", "message": "No active generation."}
+                    elif cmd == "generate":
+                        with state_lock:
+                            loading = state["loading"]
+                            load_error = state["error"]
+                            model = state["model"]
+                            fps = state["fps"]
 
+                        if loading:
+                            resp = {"status": "loading", "message": "Model is loading."}
+                            file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                            file.flush()
+                            continue
+                        if load_error:
+                            resp = {"status": "error", "message": load_error}
+                            file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                            file.flush()
+                            continue
+                        if model is None:
+                            resp = {"status": "error", "message": "Model not available."}
+                            file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                            file.flush()
+                            continue
+
+                        cancel_event = _try_begin_generate()
+                        if cancel_event is None:
+                            resp = {"status": "busy", "message": "Another generation is already running."}
+                            file.write((json.dumps(resp) + "\n").encode("utf-8"))
+                            file.flush()
+                            continue
+
+                        try:
                             from kimodo.tools import seed_everything
+
                             prompt = str(req.get("prompt", "A person walks forward.")).strip()
                             if not prompt.endswith("."):
                                 prompt += "."
@@ -937,6 +986,7 @@ def main():
 
                             num_frames = max(1, int(duration * float(fps)))
                             constraints = _load_constraints(constraints_path, model)
+                            progress_bar = _make_cancelable_progress_bar(cancel_event)
 
                             output = model(
                                 [prompt],
@@ -948,7 +998,10 @@ def main():
                                 num_transition_frames=5,
                                 post_processing=True,
                                 return_numpy=True,
+                                progress_bar=progress_bar,
                             )
+                            if cancel_event.is_set():
+                                raise GenerateCancelledError("Generation canceled.")
 
                             requested_output_format = _resolve_requested_output_format(req)
                             if requested_output_format == "flatbuf_motion_v1":
@@ -957,32 +1010,47 @@ def main():
                                 continue
 
                             resp = _build_generate_response(model, output, prompt, sample_index=0)
-                        elif cmd == "quit":
-                            resp = {"status": "bye"}
-                            _set_quitting()
-                            try:
-                                server.close()
-                            except Exception:
-                                pass
-                        else:
-                            resp = {"status": "error", "message": f"Unknown cmd: {cmd!r}"}
-                    except Exception as exc:
-                        resp = {
-                            "status": "error",
-                            "message": str(exc),
-                            "server_message": f"Bridge exception while handling {stage}",
-                            "error_type": type(exc).__name__,
-                            "stage": stage,
-                            "traceback": traceback.format_exc(),
-                        }
-                        _log(f"[bridge] error {exc}")
-                    finally:
-                        _command_finished()
+                        except GenerateCancelledError as exc:
+                            resp = {"status": "cancelled", "message": str(exc)}
+                        finally:
+                            _finish_generate(cancel_event)
+                    elif cmd == "quit":
+                        resp = {"status": "bye"}
+                        _set_quitting()
+                        try:
+                            server.close()
+                        except Exception:
+                            pass
+                    else:
+                        resp = {"status": "error", "message": f"Unknown cmd: {cmd!r}"}
+                except Exception as exc:
+                    resp = {
+                        "status": "error",
+                        "message": str(exc),
+                        "server_message": f"Bridge exception while handling {stage}",
+                        "error_type": type(exc).__name__,
+                        "stage": stage,
+                        "traceback": traceback.format_exc(),
+                    }
+                    _log(f"[bridge] error {exc}")
+                finally:
+                    _command_finished()
 
-                    try:
-                        _write_json_line(file, resp)
-                    except (ConnectionResetError, BrokenPipeError, OSError):
-                        break
+                try:
+                    _write_json_line(file, resp)
+                except (ConnectionResetError, BrokenPipeError, OSError):
+                    break
+
+    try:
+        while not _is_quitting():
+            try:
+                conn, _addr = server.accept()
+            except OSError:
+                if _is_quitting():
+                    break
+                raise
+            _log(f"[bridge] accept {_addr}")
+            threading.Thread(target=_client_worker, args=(conn, _addr), daemon=True).start()
     finally:
         try:
             server.close()
