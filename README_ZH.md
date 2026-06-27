@@ -13,8 +13,6 @@
 - Windows 10/11 x64
 - 本地工具位于 `program\exe\`：
   - `uv\uv.exe`
-  - `git\cmd\git.exe`
-  - `git\mingw32\bin\git-lfs.exe`
 - 可用模型目录（推荐）：`C:\nvlab\models~`
 
 ## 安装

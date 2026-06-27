@@ -466,35 +466,41 @@ def _validate_bitsandbytes_runtime(paths: ProjectPaths, logger: SetupLogger) -> 
     return rc == 0
 
 
-def _ensure_motion_correction(paths: ProjectPaths, uv_bin: str, logger: SetupLogger, default_index: str) -> None:
+def _ensure_motion_correction(paths: ProjectPaths, uv_bin: str, logger: SetupLogger, default_index: str) -> bool:
     logger.log("[STEP] Ensuring motion_correction...")
     rc, _ = _run_capture([str(paths.venv_python), "-c", "import motion_correction"])
     if rc == 0:
         logger.log("[INFO] motion_correction already present, skip reinstall.")
-        return
+        return True
 
-    if sys.platform == "darwin":
-        motion_correction_root = paths.source_root / "MotionCorrection"
-        if not motion_correction_root.exists():
-            raise SetupError(f"Missing MotionCorrection source tree: {motion_correction_root}")
-        logger.log("[STEP] macOS detected: installing cmake helper and building motion_correction from source...")
-        _run_logged(
-            [uv_bin, "pip", "install", "--python", str(paths.venv_python), "--default-index", default_index, "cmake"],
-            logger,
-        )
-        _run_logged(
-            [uv_bin, "pip", "install", "--python", str(paths.venv_python), "--default-index", default_index, str(motion_correction_root)],
-            logger,
-        )
-        return
+    try:
+        if sys.platform == "darwin":
+            motion_correction_root = paths.source_root / "MotionCorrection"
+            if not motion_correction_root.exists():
+                raise SetupError(f"Missing MotionCorrection source tree: {motion_correction_root}")
+            logger.log("[STEP] macOS detected: installing cmake helper and building motion_correction from source...")
+            _run_logged(
+                [uv_bin, "pip", "install", "--python", str(paths.venv_python), "--default-index", default_index, "cmake"],
+                logger,
+            )
+            _run_logged(
+                [uv_bin, "pip", "install", "--python", str(paths.venv_python), "--default-index", default_index, str(motion_correction_root)],
+                logger,
+            )
+            return True
 
-    if os.name == "nt":
-        wheel_path = paths.wheels_dir / "motion_correction-1.0.0-cp312-cp312-win_amd64.whl"
-    else:
-        wheel_path = paths.wheels_dir / "motion_correction-1.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
-    if not wheel_path.exists():
-        raise SetupError(f"Missing motion_correction wheel: {wheel_path}")
-    _run_logged([uv_bin, "pip", "install", "--python", str(paths.venv_python), str(wheel_path)], logger)
+        if os.name == "nt":
+            wheel_path = paths.wheels_dir / "motion_correction-1.0.0-cp312-cp312-win_amd64.whl"
+        else:
+            wheel_path = paths.wheels_dir / "motion_correction-1.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+        if not wheel_path.exists():
+            raise SetupError(f"Missing motion_correction wheel: {wheel_path}")
+        _run_logged([uv_bin, "pip", "install", "--python", str(paths.venv_python), str(wheel_path)], logger)
+        return True
+    except Exception as exc:
+        logger.log(f"[WARN] motion_correction setup skipped: {exc}")
+        logger.log("[WARN] Bridge will continue without motion_correction postprocessing.")
+        return False
 
 
 def _torch_runtime(paths: ProjectPaths) -> str:
@@ -512,7 +518,7 @@ def _kimodo_runtime_ready(paths: ProjectPaths) -> bool:
 
 
 def _runtime_import_check(paths: ProjectPaths) -> None:
-    script = "import numpy, huggingface_hub, modelscope, safetensors; import kimodo.model.load_model; import motion_correction"
+    script = "import numpy, huggingface_hub, modelscope, safetensors; import kimodo.model.load_model"
     rc, output = _run_capture([str(paths.venv_python), "-c", script], cwd=paths.root_dir, env={"PYTHONPATH": str(paths.source_root)})
     if rc != 0:
         raise SetupError(f"Runtime import check failed.\n{output}")

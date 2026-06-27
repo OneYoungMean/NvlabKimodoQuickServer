@@ -13,8 +13,6 @@
 - Windows 10/11 x64
 - Local tools under `program\exe\`:
   - `uv\uv.exe`
-  - `git\cmd\git.exe`
-  - `git\mingw32\bin\git-lfs.exe`
 - Model root available (recommended): `C:\nvlab\models~`
 
 ## Install
