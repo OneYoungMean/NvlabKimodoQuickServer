@@ -35,8 +35,9 @@ jobs:
         shell: bash
         run: |
           if [ -z "$DISPATCH_TOKEN" ]; then
-            echo "Missing secret CROSS_REPO_TOKEN"
-            exit 1
+            echo "CROSS_REPO_TOKEN is not configured; skipping cross-repo dispatch."
+            echo "Configure CROSS_REPO_TOKEN to enable immediate syncs."
+            exit 0
           fi
 
           curl --fail-with-body \
@@ -55,3 +56,15 @@ jobs:
             }
           }
           JSON
+
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo "Requested QuickServer ref: ${{ steps.sync_ref.outputs.value }}"
+            if [ -n "${{ secrets.CROSS_REPO_TOKEN }}" ]; then
+              echo "Dispatch mode: immediate cross-repo trigger"
+            else
+              echo "Dispatch mode: skipped because CROSS_REPO_TOKEN is missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
